@@ -1,6 +1,3 @@
-import random
-import time
-
 import matplotlib
 matplotlib.use('Agg')
 matplotlib.rcParams['pdf.fonttype'] = 42
@@ -117,7 +114,7 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
         min_ctrl=-0.05, max_ctrl=0.05, max_inclusion=0.99, max_fdr=0.1, max_enh=-0.05, min_sil=0.05, min_prob_whippet=0.9, output_dir='.',
        #n_exons = 150, n_samples = 300, z_test=False
        ):
-    name = de_file.split('/')[-1].split('_')[0]
+    name = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
     df_fai = pd.read_csv(fai, sep='\t', header=None)
     chroms = set(df_fai[0].values)
     rmats = pd.read_csv(de_file, sep='\t')
@@ -855,6 +852,10 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_rmats_silrest['class'] = 'silrest'
     df_rmats_ctrl['class'] = 'ctrl'
     df_rmats_const['class'] = 'const'
+
+    df_temp = pd.concat([df_rmats_enh, df_rmats_sil, df_rmats_enhrest, df_rmats_silrest, df_rmats_ctrl, df_rmats_const])
+    df_out = df_rmats.merge(df_temp[['num_xl_3ss', 'num_xl_5ss', 'class']], how='left', left_index = True, right_index=True)
+    df_out.to_csv(f'{output_dir}/{name}_labeled.tsv', sep='\t', index=None)
     
     
     if de_source == 'rmats':
@@ -942,8 +943,8 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_fisher_5ss['relative_position'] = range(-window, window + 1)
     df_fisher_5ss = df_fisher_5ss.set_index('relative_position')
 
-    df_fisher_3ss.to_csv(f'{output_dir}/{name}_fisher_3ss.tsv', sep='\t', index=None)
-    df_fisher_5ss.to_csv(f'{output_dir}/{name}_fisher_5ss.tsv', sep='\t', index=None)
+    # df_fisher_3ss.to_csv(f'{output_dir}/{name}_fisher_3ss.tsv', sep='\t', index=None)
+    # df_fisher_5ss.to_csv(f'{output_dir}/{name}_fisher_5ss.tsv', sep='\t', index=None)
     
     sns.set(rc={'figure.figsize':(26, 14)})
     sns.set_style("whitegrid")
@@ -954,13 +955,13 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
                   f'silenced rest {str(len(df_rmats_silrest_3ss))} exons', f'constitutive {str(len(df_rmats_const_3ss))} exons']
     fig1, axs = plt.subplots(2, 2, sharey='row')
     axs[0, 0] = sns.lineplot(data=df_final_3ss.loc[list(range(int(-window), int(window * 0.2))), :],
-        palette=colors_fig1, ax=axs[0, 0], linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0), (2, 2), (2, 2), (2, 2), (2, 2)])
+        palette=colors_fig1, ax=axs[0, 0], linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0), (2, 2), (2, 2), (2, 2)])
     axs[0, 0].set_title("Coverage around 3'SS event")
     axs[0, 0].set_ylabel('Normalised coverage of crosslinks or peaks')
     axs[0, 0].set_xlabel("Position relative to 3'SS")
     axs[0, 0].legend(new_labels)
     axs[0, 1] = sns.lineplot(data=df_final_5ss.loc[list(range(int(-window * 0.2), int(window))), :], 
-        palette=colors_fig1, ax=axs[0, 1], linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0), (2, 2), (2, 2), (2, 2), (2, 2)])
+        palette=colors_fig1, ax=axs[0, 1], linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0), (2, 2), (2, 2), (2, 2)])
     axs[0, 1].set_title("Coverage around 5'SS event")
     axs[0, 1].set_xlabel("Position relative to 5'SS")
     axs[0, 1].legend(new_labels)
@@ -971,12 +972,12 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     axs[1, 0] = sns.lineplot(data=df_fisher_3ss.loc[list(range(int(-window), int(window * 0.2))), 
                 ['enh_smooth', 'sil_smooth', 'enhrest_smooth', 'silrest_smooth', 'const_smooth']],
                  palette = colors_fig1_2,  ax=axs[1, 0], linewidth=linewidth, 
-                dashes=[(1, 0), (1, 0), (2, 2), (2, 2), (2, 2), (2, 2)])
+                dashes=[(1, 0), (1, 0), (2, 2), (2, 2), (2, 2)])
     axs[1, 0].set_ylabel("-log(pval) of coverage compared to control using Fisher's test")
     axs[1, 0].set_xlabel("Position relative to 3'SS")
     axs[1, 1] = sns.lineplot(data=df_fisher_5ss.loc[list(range(int(-window * 0.2), int(window))), 
                 ['enh_smooth', 'sil_smooth', 'enhrest_smooth', 'silrest_smooth', 'const_smooth']],
-                 palette = colors_fig1_2,  ax=axs[1, 1], linewidth=linewidth, dashes=[(1, 0), (1, 0), (2, 2), (2, 2), (2, 2), (2, 2)])
+                 palette = colors_fig1_2,  ax=axs[1, 1], linewidth=linewidth, dashes=[(1, 0), (1, 0), (2, 2), (2, 2), (2, 2)])
     axs[1, 1].set_xlabel("Position relative to 5'SS")
     plt.tight_layout()
     fig1.savefig(f'{output_dir}/{name}_fig1.pdf')
@@ -984,6 +985,7 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     if de_source == 'rmats':
         sns.set(rc={'figure.figsize':(20, 6)})
         fig2, axs = plt.subplots(1, 2, sharey='row')
+        colors = [colors_dict['enh'], colors_dict['sil'], colors_dict['ctrl']]
         sns.lineplot(data=df_final_3ss_upstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors, ax=axs[0], legend=False)
         sns.lineplot(data=df_final_5ss_upstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors, ax=axs[1], legend=False)
         axs[0].set_title("Coverage around 3'SS of upstream exon")
@@ -1103,18 +1105,15 @@ if __name__=='__main__':
     xl_bed = sys.argv[2]
     fai = sys.argv[3]
     output_folder= sys.argv[4]
-    window = sys.argv[5]#300
-    smoothing = sys.argv[6]#15 
-    min_ctrl = sys.argv[7]#-0.05
-    max_ctrl = sys.argv[8]#0.05
-    max_inclusion= sys.argv[9]#0.9
-    max_fdr = sys.argv[10]#0.1
-    max_ench = sys.argv[11]#-0.05
-    min_sil = sys.argv[12]#0.05
-    min_prob_whippet = sys.argv[13]#0.9
-    n_samples = sys.argv[14]#300 
-
+    window = int(sys.argv[5])#300
+    smoothing = int(sys.argv[6])#15 
+    min_ctrl = float(sys.argv[7])#-0.05
+    max_ctrl = float(sys.argv[8])#0.05
+    max_inclusion= float(sys.argv[9])#0.9
+    max_fdr = float(sys.argv[10])#0.1
+    max_ench = float(sys.argv[11])#-0.05
+    min_sil = float(sys.argv[12])#0.05
+    min_prob_whippet = float(sys.argv[13])#0.9
 
     run_rna_map(de_file, xl_bed, fai, output_folder, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_ench, min_sil, min_prob_whippet,
-       n_samples)
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_ench, min_sil, min_prob_whippet)
