@@ -12,6 +12,10 @@ matplotlib=3.3.2
 seaborn=0.11.0
 scipy=1.3.1
 ```
+**Preparing RNA-Seq data**:
+This code accepts rMATs junction only quantified files, or Whippet.
+Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
+
 **Usage**:  
 ```
     python3 <path_to_script> <de_file_path> <sites_file_path> <genome_fai_path> <output_folder> <window> <smoothing> <min_ctrl> <max_ctrl> <max_inclusion> <max_fdr> <max_enc> <min_sil> <min_prob_whippet>
