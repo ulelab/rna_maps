@@ -13,6 +13,7 @@ seaborn=0.11.0
 scipy=1.3.1
 ```
 **Preparing RNA-Seq data**:
+
 This code accepts rMATs junction only quantified files, or Whippet.
 Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
 
