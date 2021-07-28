@@ -1114,6 +1114,6 @@ if __name__=='__main__':
     max_ench = float(sys.argv[11])#-0.05
     min_sil = float(sys.argv[12])#0.05
     min_prob_whippet = float(sys.argv[13])#0.9
-
-    run_rna_map(de_file, xl_bed, fai, output_folder, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_ench, min_sil, min_prob_whippet)
+    
+    run_rna_map(de_file, xl_bed, fai, window, smoothing, 
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_ench, min_sil, min_prob_whippet, output_folder)
