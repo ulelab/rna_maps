@@ -995,7 +995,7 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
         axs[1].set_xlabel("Position relative to 5'SS")
         fig2.legend(new_labels)
         plt.tight_layout()
-        plt.show()
+        fig2.savefig(f'{output_dir}/{name}_upstream.pdf')
 
         sns.set(rc={'figure.figsize':(20, 6)})
         fig3, axs = plt.subplots(1, 2, sharey='row')
@@ -1008,7 +1008,7 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
         axs[1].set_xlabel("Position relative to 5'SS")
         fig3.legend(new_labels)
         plt.tight_layout()
-        plt.show()   
+        fig3.savefig(f'{output_dir}/{name}_downstream.pdf')
     
     max_b = max(max(enh_3ss_no_xl.values()), max(sil_3ss_no_xl.values()), max(ctrl_3ss_no_xl.values()),
                max(enhrest_3ss_no_xl.values()), max(silrest_3ss_no_xl.values()), max(const_3ss_no_xl.values()))
