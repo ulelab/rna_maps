@@ -871,7 +871,7 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_sil_3ss = df_sil_3ss_grouped10.join(df_sil_3ss_grouped_12).reset_index()
     df_sil_3ss = df_sil_3ss.set_index(3)
     df_rmats_sil_3ss_temp = pd.merge(df_rmats_sil_3ss_temp, df_sil_3ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_sil_3ss['index']
+    del df_rmats_sil_3ss_temp['index']
     df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp.set_index(14)
     df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp[[10, 12]]
     df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
