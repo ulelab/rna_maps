@@ -830,8 +830,8 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_final_5ss.to_csv(f'{output_dir}/{name}_final_5ss.tsv', sep='\t', index=None)
 
 
-    df_rmats_enh_3ss = df_rmats_enh_3ss.reset_index()
-    rmats_enh_3ss = pbt.BedTool.from_dataframe(df_rmats_enh_3ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss.reset_index()
+    rmats_enh_3ss = pbt.BedTool.from_dataframe(df_rmats_enh_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_enh_3ss = rmats_enh_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_enh_3ss = rmats_enh_3ss.to_dataframe(header=None)
     df_enh_3ss = df_enh_3ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -839,13 +839,13 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_enh_3ss_grouped_12 = df_enh_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_enh_3ss = df_enh_3ss_grouped10.join(df_enh_3ss_grouped_12).reset_index()
     df_enh_3ss = df_enh_3ss.set_index(3)
-    df_rmats_enh_3ss = pd.merge(df_rmats_enh_3ss, df_enh_3ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_enh_3ss['index']
-    df_rmats_enh_3ss = df_rmats_enh_3ss.set_index(14)
-    df_rmats_enh_3ss = df_rmats_enh_3ss[[10, 12]]
-    df_rmats_enh_3ss = df_rmats_enh_3ss.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
-    df_rmats_enh_5ss = df_rmats_enh_5ss.reset_index()
-    rmats_enh_5ss = pbt.BedTool.from_dataframe(df_rmats_enh_5ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_enh_3ss_temp = pd.merge(df_rmats_enh_3ss_temp, df_enh_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enh_3ss_temp['index']
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss_temp.set_index(14)
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss_temp[[10, 12]]
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss.reset_index()
+    rmats_enh_5ss = pbt.BedTool.from_dataframe(df_rmats_enh_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_enh_5ss = rmats_enh_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_enh_5ss = rmats_enh_5ss.to_dataframe(header=None)
     df_enh_5ss = df_enh_5ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -853,16 +853,16 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_enh_5ss_grouped_12 = df_enh_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_enh_5ss = df_enh_5ss_grouped10.join(df_enh_5ss_grouped_12).reset_index()
     df_enh_5ss = df_enh_5ss.set_index(3)
-    df_rmats_enh_5ss = pd.merge(df_rmats_enh_5ss, df_enh_5ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_enh_5ss['index']
-    df_rmats_enh_5ss = df_rmats_enh_5ss.set_index(14)
-    df_rmats_enh_5ss = df_rmats_enh_5ss[[10, 12]]
-    df_rmats_enh_5ss = df_rmats_enh_5ss.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+    df_rmats_enh_5ss_temp = pd.merge(df_rmats_enh_5ss_temp, df_enh_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enh_5ss_temp['index']
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss_temp.set_index(14)
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss_temp[[10, 12]]
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
 
-    df_rmats_enh = df_rmats_enh_5ss.join(df_rmats_enh_3ss)
+    df_rmats_enh = df_rmats_enh_5ss_temp.join(df_rmats_enh_3ss_temp)
 
-    df_rmats_sil_3ss = df_rmats_sil_3ss.reset_index()
-    rmats_sil_3ss = pbt.BedTool.from_dataframe(df_rmats_sil_3ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss.reset_index()
+    rmats_sil_3ss = pbt.BedTool.from_dataframe(df_rmats_sil_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_sil_3ss = rmats_sil_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_sil_3ss = rmats_sil_3ss.to_dataframe(header=None)
     df_sil_3ss = df_sil_3ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -870,14 +870,14 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_sil_3ss_grouped_12 = df_sil_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_sil_3ss = df_sil_3ss_grouped10.join(df_sil_3ss_grouped_12).reset_index()
     df_sil_3ss = df_sil_3ss.set_index(3)
-    df_rmats_sil_3ss = pd.merge(df_rmats_sil_3ss, df_sil_3ss[[10, 12]], left_on='index', right_index=True)
+    df_rmats_sil_3ss_temp = pd.merge(df_rmats_sil_3ss_temp, df_sil_3ss[[10, 12]], left_on='index', right_index=True)
     del df_rmats_sil_3ss['index']
-    df_rmats_sil_3ss = df_rmats_sil_3ss.set_index(14)
-    df_rmats_sil_3ss = df_rmats_sil_3ss[[10, 12]]
-    df_rmats_sil_3ss = df_rmats_sil_3ss.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp.set_index(14)
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp[[10, 12]]
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
 
-    df_rmats_sil_5ss = df_rmats_sil_5ss.reset_index()
-    rmats_sil_5ss = pbt.BedTool.from_dataframe(df_rmats_sil_5ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss.reset_index()
+    rmats_sil_5ss = pbt.BedTool.from_dataframe(df_rmats_sil_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_sil_5ss = rmats_sil_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_sil_5ss = rmats_sil_5ss.to_dataframe(header=None)
     df_sil_5ss = df_sil_5ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -885,15 +885,15 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_sil_5ss_grouped_12 = df_sil_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_sil_5ss = df_sil_5ss_grouped10.join(df_sil_5ss_grouped_12).reset_index()
     df_sil_5ss = df_sil_5ss.set_index(3)
-    df_rmats_sil_5ss = pd.merge(df_rmats_sil_5ss, df_sil_5ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_sil_5ss['index']
-    df_rmats_sil_5ss = df_rmats_sil_5ss.set_index(14)
-    df_rmats_sil_5ss = df_rmats_sil_5ss.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+    df_rmats_sil_5ss_temp = pd.merge(df_rmats_sil_5ss_temp, df_sil_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_sil_5ss_temp['index']
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss_temp.set_index(14)
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
 
-    df_rmats_sil = df_rmats_sil_5ss.join(df_rmats_sil_3ss)
+    df_rmats_sil = df_rmats_sil_5ss_temp.join(df_rmats_sil_3ss_temp)
 
-    df_rmats_enhrest_3ss = df_rmats_enhrest_3ss.reset_index()
-    rmats_enhrest_3ss = pbt.BedTool.from_dataframe(df_rmats_enhrest_3ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss.reset_index()
+    rmats_enhrest_3ss = pbt.BedTool.from_dataframe(df_rmats_enhrest_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_enhrest_3ss = rmats_enhrest_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_enhrest_3ss = rmats_enhrest_3ss.to_dataframe(header=None)
     df_enhrest_3ss = df_enhrest_3ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -901,14 +901,14 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_enhrest_3ss_grouped_12 = df_enhrest_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_enhrest_3ss = df_enhrest_3ss_grouped10.join(df_enhrest_3ss_grouped_12).reset_index()
     df_enhrest_3ss = df_enhrest_3ss.set_index(3)
-    df_rmats_enhrest_3ss = pd.merge(df_rmats_enhrest_3ss, df_enhrest_3ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_enhrest_3ss['index']
-    df_rmats_enhrest_3ss = df_rmats_enhrest_3ss.set_index(14)
-    df_rmats_enhrest_3ss = df_rmats_enhrest_3ss[[10, 12]]
-    df_rmats_enhrest_3ss = df_rmats_enhrest_3ss.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+    df_rmats_enhrest_3ss_temp = pd.merge(df_rmats_enhrest_3ss_temp, df_enhrest_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enhrest_3ss_temp['index']
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss_temp.set_index(14)
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss_temp[[10, 12]]
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
 
-    df_rmats_enhrest_5ss = df_rmats_enhrest_5ss.reset_index()
-    rmats_enhrest_5ss = pbt.BedTool.from_dataframe(df_rmats_enhrest_5ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss.reset_index()
+    rmats_enhrest_5ss = pbt.BedTool.from_dataframe(df_rmats_enhrest_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_enhrest_5ss = rmats_enhrest_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_enhrest_5ss = rmats_enhrest_5ss.to_dataframe(header=None)
     df_enhrest_5ss = df_enhrest_5ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -916,16 +916,16 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_enhrest_5ss_grouped_12 = df_enhrest_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_enhrest_5ss = df_enhrest_5ss_grouped10.join(df_enhrest_5ss_grouped_12).reset_index()
     df_enhrest_5ss = df_enhrest_5ss.set_index(3)
-    df_rmats_enhrest_5ss = pd.merge(df_rmats_enhrest_5ss, df_enhrest_5ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_enhrest_5ss['index']
-    df_rmats_enhrest_5ss = df_rmats_enhrest_5ss.set_index(14)
-    df_rmats_enhrest_5ss = df_rmats_enhrest_5ss[[10, 12]]
-    df_rmats_enhrest_5ss = df_rmats_enhrest_5ss.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+    df_rmats_enhrest_5ss_temp = pd.merge(df_rmats_enhrest_5ss_temp, df_enhrest_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enhrest_5ss_temp['index']
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss_temp.set_index(14)
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss_temp[[10, 12]]
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
 
-    df_rmats_enhrest = df_rmats_enhrest_5ss.join(df_rmats_enhrest_3ss)
+    df_rmats_enhrest = df_rmats_enhrest_5ss_temp.join(df_rmats_enhrest_3ss_temp)
 
-    df_rmats_silrest_3ss = df_rmats_silrest_3ss.reset_index()
-    rmats_silrest_3ss = pbt.BedTool.from_dataframe(df_rmats_silrest_3ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss.reset_index()
+    rmats_silrest_3ss = pbt.BedTool.from_dataframe(df_rmats_silrest_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_silrest_3ss = rmats_silrest_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_silrest_3ss = rmats_silrest_3ss.to_dataframe(header=None)
     df_silrest_3ss = df_silrest_3ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -933,14 +933,14 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_silrest_3ss_grouped_12 = df_silrest_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_silrest_3ss = df_silrest_3ss_grouped10.join(df_silrest_3ss_grouped_12).reset_index()
     df_silrest_3ss = df_silrest_3ss.set_index(3)
-    df_rmats_silrest_3ss = pd.merge(df_rmats_silrest_3ss, df_silrest_3ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_silrest_3ss['index']
-    df_rmats_silrest_3ss = df_rmats_silrest_3ss.set_index(14)
-    df_rmats_silrest_3ss = df_rmats_silrest_3ss[[10, 12]]
-    df_rmats_silrest_3ss = df_rmats_silrest_3ss.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+    df_rmats_silrest_3ss_temp = pd.merge(df_rmats_silrest_3ss_temp, df_silrest_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_silrest_3ss_temp['index']
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss_temp.set_index(14)
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss_temp[[10, 12]]
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
 
-    df_rmats_silrest_5ss = df_rmats_silrest_5ss.reset_index()
-    rmats_silrest_5ss = pbt.BedTool.from_dataframe(df_rmats_silrest_5ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss.reset_index()
+    rmats_silrest_5ss = pbt.BedTool.from_dataframe(df_rmats_silrest_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_silrest_5ss = rmats_silrest_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_silrest_5ss = rmats_silrest_5ss.to_dataframe(header=None)
     df_silrest_5ss = df_silrest_5ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -948,16 +948,16 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_silrest_5ss_grouped_12 = df_silrest_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_silrest_5ss = df_silrest_5ss_grouped10.join(df_silrest_5ss_grouped_12).reset_index()
     df_silrest_5ss = df_silrest_5ss.set_index(3)
-    df_rmats_silrest_5ss = pd.merge(df_rmats_silrest_5ss, df_silrest_5ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_silrest_5ss['index']
-    df_rmats_silrest_5ss = df_rmats_silrest_5ss.set_index(14)
-    df_rmats_silrest_5ss = df_rmats_silrest_5ss[[10, 12]]
-    df_rmats_silrest_5ss = df_rmats_silrest_5ss.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+    df_rmats_silrest_5ss_temp = pd.merge(df_rmats_silrest_5ss_temp, df_silrest_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_silrest_5ss_temp['index']
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss_temp.set_index(14)
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss_temp[[10, 12]]
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
 
-    df_rmats_silrest = df_rmats_silrest_5ss.join(df_rmats_silrest_3ss)
+    df_rmats_silrest = df_rmats_silrest_5ss_temp.join(df_rmats_silrest_3ss_temp)
 
-    df_rmats_ctrl_3ss = df_rmats_ctrl_3ss.reset_index()
-    rmats_ctrl_3ss = pbt.BedTool.from_dataframe(df_rmats_ctrl_3ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss.reset_index()
+    rmats_ctrl_3ss = pbt.BedTool.from_dataframe(df_rmats_ctrl_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_ctrl_3ss = rmats_ctrl_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_ctrl_3ss = rmats_ctrl_3ss.to_dataframe(header=None)
     df_ctrl_3ss = df_ctrl_3ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -965,14 +965,14 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_ctrl_3ss_grouped_12 = df_ctrl_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_ctrl_3ss = df_ctrl_3ss_grouped10.join(df_ctrl_3ss_grouped_12).reset_index()
     df_ctrl_3ss = df_ctrl_3ss.set_index(3)
-    df_rmats_ctrl_3ss = pd.merge(df_rmats_ctrl_3ss, df_ctrl_3ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_ctrl_3ss['index']
-    df_rmats_ctrl_3ss = df_rmats_ctrl_3ss.set_index(14)
-    df_rmats_ctrl_3ss = df_rmats_ctrl_3ss[[10, 12]]
-    df_rmats_ctrl_3ss = df_rmats_ctrl_3ss.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+    df_rmats_ctrl_3ss_temp = pd.merge(df_rmats_ctrl_3ss_temp, df_ctrl_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_ctrl_3ss_temp['index']
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss_temp.set_index(14)
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss_temp[[10, 12]]
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
 
-    df_rmats_ctrl_5ss = df_rmats_ctrl_5ss.reset_index()
-    rmats_ctrl_5ss = pbt.BedTool.from_dataframe(df_rmats_ctrl_5ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss.reset_index()
+    rmats_ctrl_5ss = pbt.BedTool.from_dataframe(df_rmats_ctrl_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_ctrl_5ss = rmats_ctrl_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_ctrl_5ss = rmats_ctrl_5ss.to_dataframe(header=None)
     df_ctrl_5ss = df_ctrl_5ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -980,16 +980,16 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_ctrl_5ss_grouped_12 = df_ctrl_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_ctrl_5ss = df_ctrl_5ss_grouped10.join(df_ctrl_5ss_grouped_12).reset_index()
     df_ctrl_5ss = df_ctrl_5ss.set_index(3)
-    df_rmats_ctrl_5ss = pd.merge(df_rmats_ctrl_5ss, df_ctrl_5ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_ctrl_5ss['index']
-    df_rmats_ctrl_5ss = df_rmats_ctrl_5ss.set_index(14)
-    df_rmats_ctrl_5ss = df_rmats_ctrl_5ss[[10, 12]]
-    df_rmats_ctrl_5ss = df_rmats_ctrl_5ss.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+    df_rmats_ctrl_5ss_temp = pd.merge(df_rmats_ctrl_5ss_temp, df_ctrl_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_ctrl_5ss_temp['index']
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss_temp.set_index(14)
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss_temp[[10, 12]]
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
 
-    df_rmats_ctrl = df_rmats_ctrl_5ss.join(df_rmats_ctrl_3ss)
+    df_rmats_ctrl = df_rmats_ctrl_5ss_temp.join(df_rmats_ctrl_3ss_temp)
 
-    df_rmats_const_3ss = df_rmats_const_3ss.reset_index()
-    rmats_const_3ss = pbt.BedTool.from_dataframe(df_rmats_const_3ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_const_3ss_temp = df_rmats_const_3ss.reset_index()
+    rmats_const_3ss = pbt.BedTool.from_dataframe(df_rmats_const_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_const_3ss = rmats_const_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_const_3ss = rmats_const_3ss.to_dataframe(header=None)
     df_const_3ss = df_const_3ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -997,14 +997,14 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_const_3ss_grouped_12 = df_const_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_const_3ss = df_const_3ss_grouped10.join(df_const_3ss_grouped_12).reset_index()
     df_const_3ss = df_const_3ss.set_index(3)
-    df_rmats_const_3ss = pd.merge(df_rmats_const_3ss, df_const_3ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_const_3ss['index']
-    df_rmats_const_3ss = df_rmats_const_3ss.set_index(14)
-    df_rmats_const_3ss = df_rmats_const_3ss[[10, 12]]
-    df_rmats_const_3ss = df_rmats_const_3ss.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+    df_rmats_const_3ss_temp = pd.merge(df_rmats_const_3ss_temp, df_const_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_const_3ss_temp['index']
+    df_rmats_const_3ss_temp = df_rmats_const_3ss_temp.set_index(14)
+    df_rmats_const_3ss_temp = df_rmats_const_3ss_temp[[10, 12]]
+    df_rmats_const_3ss_temp = df_rmats_const_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
 
-    df_rmats_const_5ss = df_rmats_const_5ss.reset_index()
-    rmats_const_5ss = pbt.BedTool.from_dataframe(df_rmats_const_5ss[['chr', 'start', 'end', 'index', 14, 'strand']])
+    df_rmats_const_5ss_temp = df_rmats_const_5ss.reset_index()
+    rmats_const_5ss = pbt.BedTool.from_dataframe(df_rmats_const_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
     rmats_const_5ss = rmats_const_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
     df_const_5ss = rmats_const_5ss.to_dataframe(header=None)
     df_const_5ss = df_const_5ss[[0, 1, 2, 3, 4, 10, 12]]
@@ -1012,13 +1012,13 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_const_5ss_grouped_12 = df_const_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
     df_const_5ss = df_const_5ss_grouped10.join(df_const_5ss_grouped_12).reset_index()
     df_const_5ss = df_const_5ss.set_index(3)
-    df_rmats_const_5ss = pd.merge(df_rmats_const_5ss, df_const_5ss[[10, 12]], left_on='index', right_index=True)
-    del df_rmats_const_5ss['index']
-    df_rmats_const_5ss = df_rmats_const_5ss.set_index(14)
-    df_rmats_const_5ss = df_rmats_const_5ss[[10, 12]]
-    df_rmats_const_5ss = df_rmats_const_5ss.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+    df_rmats_const_5ss_temp = pd.merge(df_rmats_const_5ss_temp, df_const_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_const_5ss_temp['index']
+    df_rmats_const_5ss_temp = df_rmats_const_5ss_temp.set_index(14)
+    df_rmats_const_5ss_temp = df_rmats_const_5ss_temp[[10, 12]]
+    df_rmats_const_5ss_temp = df_rmats_const_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
 
-    df_rmats_const = df_rmats_const_5ss.join(df_rmats_const_3ss)
+    df_rmats_const = df_rmats_const_5ss_temp.join(df_rmats_const_3ss_temp)
 
     df_rmats_enh['class'] = 'enh'
     df_rmats_sil['class'] = 'sil'
