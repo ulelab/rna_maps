@@ -1049,6 +1049,11 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
         df_final_5ss_downstream = df_enh_5ss_downstream.rolling(smoothing, center=True, win_type="gaussian").mean(std=2).merge(
             df_sil_5ss_downstream.rolling(smoothing, center=True, win_type="gaussian").mean(std=2), left_index=True, right_index=True).merge(
             df_ctrl_5ss_downstream.rolling(smoothing, center=True, win_type="gaussian").mean(std=2), left_index=True, right_index=True)
+        df_final_3ss_upstream.to_csv(f'{output_dir}/{name}_final_3ss_upstream.tsv', sep='\t', index=None)
+        df_final_5ss_upstream.to_csv(f'{output_dir}/{name}_final_5ss_upstream.tsv', sep='\t', index=None)
+        df_final_3ss_downstream.to_csv(f'{output_dir}/{name}_final_3ss_downstream.tsv', sep='\t', index=None)
+        df_final_5ss_downstream.to_csv(f'{output_dir}/{name}_final_5ss_downstream.tsv', sep='\t', index=None)
+        
     
     # if z_test:
     #     df_radnom_ctrl_3ss = get_random_coverage(df_coverage_3ss, window, n_exons, n_samples).rename(
@@ -1162,29 +1167,39 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     
     if de_source == 'rmats':
         sns.set(rc={'figure.figsize':(20, 6)})
+        sns.set_style("whitegrid")
         fig2, axs = plt.subplots(1, 2, sharey='row')
-        colors = [colors_dict['enh'], colors_dict['sil'], colors_dict['ctrl']]
-        sns.lineplot(data=df_final_3ss_upstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors, ax=axs[0], legend=False)
-        sns.lineplot(data=df_final_5ss_upstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors, ax=axs[1], legend=False)
+        colors_fig2 = [colors_dict['enh'], colors_dict['sil'], colors_dict['ctrl']]
+        new_labels2 = [f'enhanced {str(len(df_rmats_enh_3ss))} exons', f'silenced {str(len(df_rmats_sil_3ss))} exons',
+                  f'control {str(len(df_rmats_ctrl_3ss))} exons']
+        sns.lineplot(data=df_final_3ss_upstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors_fig2, ax=axs[0], 
+            linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0)])
+        sns.lineplot(data=df_final_5ss_upstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors_fig2, ax=axs[1], 
+            linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0)])
         axs[0].set_title("Coverage around 3'SS of upstream exon")
         axs[1].set_title("Coverage around 5'SS of upstream exon")
         axs[0].set_ylabel('Normalised coverage of crosslinks or peaks')
         axs[0].set_xlabel("Position relative to 3'SS")
         axs[1].set_xlabel("Position relative to 5'SS")
-        fig2.legend(new_labels)
+        axs[0].legend(new_labels2)
+        axs[1].legend(new_labels2)
         plt.tight_layout()
         fig2.savefig(f'{output_dir}/{name}_upstream.pdf')
 
         sns.set(rc={'figure.figsize':(20, 6)})
+        sns.set_style("whitegrid")
         fig3, axs = plt.subplots(1, 2, sharey='row')
-        sns.lineplot(data=df_final_3ss_downstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors, ax=axs[0], legend=False)
-        sns.lineplot(data=df_final_5ss_downstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors, ax=axs[1], legend=False)
+        sns.lineplot(data=df_final_3ss_downstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors_fig2, ax=axs[0], 
+            linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0)])
+        sns.lineplot(data=df_final_5ss_downstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors_fig2, ax=axs[1], 
+            linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0)])
         axs[0].set_title("Coverage around 3'SS of downstream exon")
         axs[1].set_title("Coverage around 5'SS of downstream exon")
         axs[0].set_ylabel('Normalised coverage of crosslinks or peaks')
         axs[0].set_xlabel("Position relative to 3'SS")
         axs[1].set_xlabel("Position relative to 5'SS")
-        fig3.legend(new_labels)
+        axs[0].legend(new_labels2)
+        axs[1].legend(new_labels2)
         plt.tight_layout()
         fig3.savefig(f'{output_dir}/{name}_downstream.pdf')
     
