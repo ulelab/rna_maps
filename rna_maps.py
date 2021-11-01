@@ -182,6 +182,80 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
         df_rmats_enhrest_5ss = rmats_5ss[(rmats_5ss[4] < max_enh) & (rmats_5ss[3] >= max_fdr)].rename(columns=col_rename) 
         df_rmats_silrest_3ss = rmats_3ss[(rmats_3ss[4] > min_sil) & (rmats_3ss[3] >= max_fdr)].rename(columns=col_rename)
         df_rmats_silrest_5ss = rmats_5ss[(rmats_5ss[4] > min_sil) & (rmats_3ss[3] >= max_fdr)].rename(columns=col_rename)
+
+        df_rmats_ctrl_3ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_ctrl_5ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_const_3ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_const_5ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_enh_3ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_enh_5ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_sil_3ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_sil_5ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_enhrest_3ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_enhrest_5ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_silrest_3ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+        df_rmats_silrest_5ss.drop_duplicates(subset=['start', 'end'], inplace=True)
+
+        df_rmats_sil_3ss = df_rmats_sil_3ss[~((df_rmats_sil_3ss['start'].isin(df_rmats_enh_3ss['start']) &
+         (df_rmats_sil_3ss['end'].isin(df_rmats_enh_3ss['end'])))]
+        df_rmats_sil_5ss = df_rmats_sil_5ss[~((df_rmats_sil_5ss['start'].isin(df_rmats_enh_5ss['start']) &
+         (df_rmats_sil_5ss['end'].isin(df_rmats_enh_5ss['end'])))]
+        
+        df_rmats_enh_3ss = df_rmats_enh_3ss[~((df_rmats_enh_3ss['start'].isin(df_rmats_sil_3ss['start']) &
+         (df_rmats_enh_3ss['end'].isin(df_rmats_sil_3ss['end'])))]
+        df_rmats_enh_5ss = df_rmats_enh_5ss[~((df_rmats_enh_5ss['start'].isin(df_rmats_sil_5ss['start']) &
+         (df_rmats_enh_5ss['end'].isin(df_rmats_sil_5ss['end'])))]
+
+        df_rmats_silrest_3ss = df_rmats_silrest_3ss[~(
+            (df_rmats_silrest_3ss['start'].isin(df_rmats_enhrest_3ss['start']) & (df_rmats_silrest_3ss['end'].isin(df_rmats_enhrest_3ss['end'])) |\
+            (df_rmats_silrest_3ss['start'].isin(df_rmats_sil_3ss['start']) & (df_rmats_silrest_3ss['end'].isin(df_rmats_sil_3ss['end'])) |\
+            (df_rmats_silrest_3ss['start'].isin(df_rmats_enh_3ss['start']) & (df_rmats_silrest_3ss['end'].isin(df_rmats_enh_3ss['end'])) |\
+            )]
+        df_rmats_silrest_5ss = df_rmats_silrest_5ss[~(
+            (df_rmats_silrest_5ss['start'].isin(df_rmats_enhrest_5ss['start']) & (df_rmats_silrest_5ss['end'].isin(df_rmats_enhrest_5ss['end'])) |\
+            (df_rmats_silrest_5ss['start'].isin(df_rmats_sil_5ss['start']) & (df_rmats_silrest_5ss['end'].isin(df_rmats_sil_5ss['end'])) |\
+            (df_rmats_silrest_5ss['start'].isin(df_rmats_enh_5ss['start']) & (df_rmats_silrest_5ss['end'].isin(df_rmats_enh_5ss['end'])) |\
+            )]
+        
+        df_rmats_enhrest_3ss = df_rmats_enhrest_3ss[~(
+            (df_rmats_enhrest_3ss['start'].isin(df_rmats_enhrest_3ss['start']) & (df_rmats_enhrest_3ss['end'].isin(df_rmats_silrest_3ss['end'])) |\
+            (df_rmats_enhrest_3ss['start'].isin(df_rmats_sil_3ss['start']) & (df_rmats_enhrest_3ss['end'].isin(df_rmats_sil_3ss['end'])) |\
+            (df_rmats_enhrest_3ss['start'].isin(df_rmats_enh_3ss['start']) & (df_rmats_enhrest_3ss['end'].isin(df_rmats_enh_3ss['end'])) |\
+            )]
+        df_rmats_enhrest_5ss = df_rmats_enhrest_5ss[~(
+            (df_rmats_enhrest_5ss['start'].isin(df_rmats_enhrest_5ss['start']) & (df_rmats_enhrest_5ss['end'].isin(df_rmats_silrest_5ss['end'])) |\
+            (df_rmats_enhrest_5ss['start'].isin(df_rmats_sil_5ss['start']) & (df_rmats_enhrest_5ss['end'].isin(df_rmats_sil_5ss['end'])) |\
+            (df_rmats_enhrest_5ss['start'].isin(df_rmats_enh_5ss['start']) & (df_rmats_enhrest_5ss['end'].isin(df_rmats_enh_5ss['end'])) |\
+            )]
+
+        df_rmats_ctrl_3ss = df_rmats_ctrl_3ss[~(
+            (df_rmats_ctrl_3ss['start'].isin(df_rmats_sil_3ss['start']) & (df_rmats_ctrl_3ss['end'].isin(df_rmats_sil_3ss['end'])) |\
+            (df_rmats_ctrl_3ss['start'].isin(df_rmats_enh_3ss['start']) & (df_rmats_ctrl_3ss['end'].isin(df_rmats_enh_3ss['end'])) |\
+            (df_rmats_ctrl_3ss['start'].isin(df_rmats_silrest_3ss['start']) & (df_rmats_ctrl_3ss['end'].isin(df_rmats_silrest_3ss['end'])) |\
+            (df_rmats_ctrl_3ss['start'].isin(df_rmats_enhrest_3ss['start']) & (df_rmats_ctrl_3ss['end'].isin(df_rmats_enhrest_3ss['end']))
+            )]
+        df_rmats_ctrl_5ss = df_rmats_ctrl_5ss[~(
+            (df_rmats_ctrl_5ss['start'].isin(df_rmats_sil_5ss['start']) & (df_rmats_ctrl_5ss['end'].isin(df_rmats_sil_5ss['end'])) |\
+            (df_rmats_ctrl_5ss['start'].isin(df_rmats_enh_5ss['start']) & (df_rmats_ctrl_5ss['end'].isin(df_rmats_enh_5ss['end'])) |\
+            (df_rmats_ctrl_5ss['start'].isin(df_rmats_silrest_5ss['start']) & (df_rmats_ctrl_5ss['end'].isin(df_rmats_silrest_5ss['end'])) |\
+            (df_rmats_ctrl_5ss['start'].isin(df_rmats_enhrest_5ss['start']) & (df_rmats_ctrl_5ss['end'].isin(df_rmats_enhrest_5ss['end']))
+            )]
+
+        df_rmats_const_3ss = df_rmats_const_3ss[~(
+            (df_rmats_const_3ss['start'].isin(df_rmats_sil_3ss['start']) & (df_rmats_const_3ss['end'].isin(df_rmats_sil_3ss['end'])) |\
+            (df_rmats_const_3ss['start'].isin(df_rmats_enh_3ss['start']) & (df_rmats_const_3ss['end'].isin(df_rmats_enh_3ss['end'])) |\
+            (df_rmats_const_3ss['start'].isin(df_rmats_silrest_3ss['start']) & (df_rmats_const_3ss['end'].isin(df_rmats_silrest_3ss['end'])) |\
+            (df_rmats_const_3ss['start'].isin(df_rmats_enhrest_3ss['start']) & (df_rmats_const_3ss['end'].isin(df_rmats_enhrest_3ss['end'])) |\
+            (df_rmats_const_3ss['start'].isin(df_rmats_ctrl_3ss['start']) & (df_rmats_const_3ss['end'].isin(df_rmats_ctrl_3ss['end']))
+            )]
+        df_rmats_const_5ss = df_rmats_const_5ss[~(
+            (df_rmats_const_5ss['start'].isin(df_rmats_sil_5ss['start']) & (df_rmats_const_5ss['end'].isin(df_rmats_sil_5ss['end'])) |\
+            (df_rmats_const_5ss['start'].isin(df_rmats_enh_5ss['start']) & (df_rmats_const_5ss['end'].isin(df_rmats_enh_5ss['end'])) |\
+            (df_rmats_const_5ss['start'].isin(df_rmats_silrest_5ss['start']) & (df_rmats_const_5ss['end'].isin(df_rmats_silrest_5ss['end'])) |\
+            (df_rmats_const_5ss['start'].isin(df_rmats_enhrest_5ss['start']) & (df_rmats_const_5ss['end'].isin(df_rmats_enhrest_5ss['end'])) |\
+            (df_rmats_const_5ss['start'].isin(df_rmats_ctrl_5ss['start']) & (df_rmats_const_5ss['end'].isin(df_rmats_ctrl_5ss['end']))
+            )]
+            
         index_selected = df_rmats_ctrl_3ss.index.union(df_rmats_enh_3ss.index.union(
             df_rmats_sil_3ss.index.union(df_rmats_enhrest_3ss.index.union(df_rmats_silrest_3ss.index.union(df_rmats_const_3ss.index)))))
 
