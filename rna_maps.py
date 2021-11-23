@@ -2301,8 +2301,8 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_fisher_5ss['relative_position'] = range(-window, window + 1)
     df_fisher_5ss = df_fisher_5ss.set_index('relative_position')
 
-    # df_fisher_3ss.to_csv(f'{output_dir}/{name}_fisher_3ss.tsv', sep='\t', index=None)
-    # df_fisher_5ss.to_csv(f'{output_dir}/{name}_fisher_5ss.tsv', sep='\t', index=None)
+    df_fisher_3ss.to_csv(f'{output_dir}/{name}_fisher_3ss.tsv', sep='\t', index=None)
+    df_fisher_5ss.to_csv(f'{output_dir}/{name}_fisher_5ss.tsv', sep='\t', index=None)
     
     sns.set(rc={'figure.figsize':(26, 14)})
     sns.set_style("whitegrid")
