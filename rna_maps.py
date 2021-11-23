@@ -84,8 +84,8 @@ def get_3ss5ss_exons(df_exons):
     exons_stranded.loc[df_exons[5] == '-', 8] = df_exons[7] # replace end with start upstream exon
     exons_stranded.loc[df_exons[5] == '-', 9] = df_exons[10] # replace start with end downstream exon
     exons_stranded.loc[df_exons[5] == '-', 10] = df_exons[9] # replace end with start downstream exon
-    exons_3ss = exons_stranded[[0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13]].copy() # takes all the starts for 3ss
-    exons_5ss = exons_stranded[[0, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13]].copy() # takes all the ends for 5ss
+    exons_3ss = exons_stranded[[0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14]].copy() # takes all the starts for 3ss
+    exons_5ss = exons_stranded[[0, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14]].copy() # takes all the ends for 5ss
     exons_3ss[2] = exons_3ss[1] + 1 # calculates end from start
     exons_5ss[1] = exons_5ss[2] # assigns start to end for 5ss
     exons_5ss[2] = exons_5ss[1] + 1 # calulates end from start
@@ -95,19 +95,20 @@ def get_3ss5ss_exons(df_exons):
     exons_3ss[10] = exons_3ss[9] + 1 # calculates end from start for downstream exons
     exons_5ss[9] = exons_5ss[10] # assigns start to end for 5ss for downstream exons
     exons_5ss[10] = exons_5ss[9] + 1 # calulates end from start for downstream exons
-    return exons_3ss[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]], exons_5ss[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]]
+    return exons_3ss[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]], exons_5ss[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]]
+
 
 def get_3ss5ss_exons_whippet(df_exons):
     exons_stranded = df_exons.copy()
     exons_stranded.loc[df_exons['strand'] == '-', 'start'] = df_exons['end'] # replace start with end
     exons_stranded.loc[df_exons['strand'] == '-', 'end'] = df_exons['start'] # replace end with start
-    exons_3ss = exons_stranded[['chrom', 'start', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion']].copy() # takes all the starts for 3ss
-    exons_5ss = exons_stranded[['chrom', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion']].copy() # takes all the ends for 5ss
+    exons_3ss = exons_stranded[['chrom', 'start', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']].copy() # takes all the starts for 3ss
+    exons_5ss = exons_stranded[['chrom', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']].copy() # takes all the ends for 5ss
     exons_3ss['end'] = exons_3ss['start'] + 1 # calculates end from start
     exons_5ss['start'] = exons_5ss['end'] # assigns start to end for 5ss
     exons_5ss['end'] = exons_5ss['start'] + 1 # calulates end from start
-    return exons_3ss[['chrom', 'start', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion']], exons_5ss[
-        ['chrom', 'start', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion']]
+    return exons_3ss[['chrom', 'start', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']], exons_5ss[
+        ['chrom', 'start', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']]
 
 
 def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15, 
@@ -122,15 +123,123 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
         rmats = rmats[rmats['chr'].isin(chroms)]
         rmats['inclusion'] = (rmats.IncLevel1.str.split(',') + rmats.IncLevel2.str.split(','))
         rmats['inclusion'] = rmats['inclusion'].apply(lambda x: sum([float(y) for y in x if y != 'NA']) / len(x))
+        
         df_rmats =  rmats.loc[ : ,['chr', 'exonStart_0base', 'exonEnd', 'FDR', 'IncLevelDifference', 'strand', 'inclusion', 
                                    'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE']].rename(
             columns={'chr': 0, 'exonStart_0base': 1, 'exonEnd': 2, 'FDR': 3, 'IncLevelDifference': 4, 'strand': 5, 'inclusion': 6, 
                      'upstreamES': 7, 'upstreamEE': 8, 'downstreamES': 9, 'downstreamEE': 10})
+        
+        df_rmats = df_rmats.reset_index()
+        df_rmats = df_rmats.rename(columns={'index': 14})
+        
+        df_rmats_ctrl = df_rmats[(df_rmats[4] > min_ctrl) & (df_rmats[4] < max_ctrl) &
+                                      (df_rmats[6] < max_inclusion) & (df_rmats[3] > max_fdr)]#.rename(columns=col_rename)
+        df_rmats_const = df_rmats[(df_rmats[4] > min_ctrl) & (df_rmats[4] < max_ctrl) &
+                                      (df_rmats[6] > max_inclusion) & (df_rmats[3] > max_fdr)]#.rename(columns=col_rename)
+        df_rmats_enh = df_rmats[(df_rmats[4] < max_enh) & (df_rmats[3] < max_fdr)]#.rename(columns=col_rename)
+        df_rmats_sil = df_rmats[(df_rmats[4] > min_sil) & (df_rmats[3] < max_fdr)]#.rename(columns=col_rename)
+        df_rmats_enhrest = df_rmats[(df_rmats[4] < max_enh) & (df_rmats[3] >= max_fdr)]#.rename(columns=col_rename)
+        df_rmats_silrest = df_rmats[(df_rmats[4] > min_sil) & (df_rmats[3] >= max_fdr)]#.rename(columns=col_rename)
+        
+        print('All exons in the rmats file')
+        print('df_rmats_ctrl', len(df_rmats_ctrl))
+        print('df_rmats_const', len(df_rmats_const))
+        print('df_rmats_enh', len(df_rmats_enh))
+        print('df_rmats_sil', len(df_rmats_sil))
+        print('df_rmats_enhrest', len(df_rmats_enhrest))
+        print('df_rmats_silrest', len(df_rmats_silrest))
+        print()
+
+        df_rmats_ctrl.drop_duplicates(subset=[1, 2], inplace=True)
+        df_rmats_const.drop_duplicates(subset=[1, 2], inplace=True)
+        df_rmats_enh.drop_duplicates(subset=[1, 2], inplace=True)
+        df_rmats_sil.drop_duplicates(subset=[1, 2], inplace=True)
+        df_rmats_enhrest.drop_duplicates(subset=[1, 2], inplace=True)
+        df_rmats_silrest.drop_duplicates(subset=[1, 2], inplace=True)
+
+        print('Exons after deduplication')
+        print('df_rmats_ctrl', len(df_rmats_ctrl))
+        print('df_rmats_const', len(df_rmats_const))
+        print('df_rmats_enh', len(df_rmats_enh))
+        print('df_rmats_sil', len(df_rmats_sil))
+        print('df_rmats_enhrest', len(df_rmats_enhrest))
+        print('df_rmats_silrest', len(df_rmats_silrest))
+        print()
+
+        df_rmats_sil = df_rmats_sil[~(
+            ((df_rmats_sil[1].isin(df_rmats_enh[1])) & (df_rmats_sil[2].isin(df_rmats_enh[2])))
+            )]
+
+        df_rmats_enh = df_rmats_enh[~(
+            ((df_rmats_enh[1].isin(df_rmats_sil[1])) & (df_rmats_enh[2].isin(df_rmats_sil[2])))
+            )]
+
+        df_rmats_silrest = df_rmats_silrest[~(
+            ((df_rmats_silrest[1].isin(df_rmats_enhrest[1])) & (df_rmats_silrest[2].isin(df_rmats_enhrest[2]))) |\
+            ((df_rmats_silrest[1].isin(df_rmats_sil[1])) & (df_rmats_silrest[2].isin(df_rmats_sil[2]))) |\
+            ((df_rmats_silrest[1].isin(df_rmats_enh[1])) & (df_rmats_silrest[2].isin(df_rmats_enh[2])))
+            )]
+
+        df_rmats_enhrest = df_rmats_enhrest[~(
+            ((df_rmats_enhrest[1].isin(df_rmats_enhrest[1])) & (df_rmats_enhrest[2].isin(df_rmats_silrest[2]))) |\
+            ((df_rmats_enhrest[1].isin(df_rmats_sil[1])) & (df_rmats_enhrest[2].isin(df_rmats_sil[2]))) |\
+            ((df_rmats_enhrest[1].isin(df_rmats_enh[1])) & (df_rmats_enhrest[2].isin(df_rmats_enh[2])))
+            )]
+
+        df_rmats_ctrl = df_rmats_ctrl[~(
+            ((df_rmats_ctrl[1].isin(df_rmats_sil[1])) & (df_rmats_ctrl[2].isin(df_rmats_sil[2]))) |\
+            ((df_rmats_ctrl[1].isin(df_rmats_enh[1])) & (df_rmats_ctrl[2].isin(df_rmats_enh[2]))) |\
+            ((df_rmats_ctrl[1].isin(df_rmats_silrest[1])) & (df_rmats_ctrl[2].isin(df_rmats_silrest[2]))) |\
+            ((df_rmats_ctrl[1].isin(df_rmats_enhrest[1])) & (df_rmats_ctrl[2].isin(df_rmats_enhrest[2])))
+            )]
+
+        df_rmats_const = df_rmats_const[~(
+            ((df_rmats_const[1].isin(df_rmats_sil[1])) & (df_rmats_const[2].isin(df_rmats_sil[2]))) |\
+            ((df_rmats_const[1].isin(df_rmats_enh[1])) & (df_rmats_const[2].isin(df_rmats_enh[2]))) |\
+            ((df_rmats_const[1].isin(df_rmats_silrest[1])) & (df_rmats_const[2].isin(df_rmats_silrest[2]))) |\
+            ((df_rmats_const[1].isin(df_rmats_enhrest[1])) & (df_rmats_const[2].isin(df_rmats_enhrest[2]))) |\
+            ((df_rmats_const[1].isin(df_rmats_ctrl[1])) & (df_rmats_const[2].isin(df_rmats_ctrl[2])))
+            )]
+
+        print('Exons after filtering for overlaps between classes')
+        print('df_rmats_ctrl', len(df_rmats_ctrl))
+        print('df_rmats_const', len(df_rmats_const))
+        print('df_rmats_enh', len(df_rmats_enh))
+        print('df_rmats_sil', len(df_rmats_sil))
+        print('df_rmats_enhrest', len(df_rmats_enhrest))
+        print('df_rmats_silrest', len(df_rmats_silrest))
+
+        
+        
+#         df_rmats =  rmats.loc[ : ,['chr', 'exonStart_0base', 'exonEnd', 'FDR', 'IncLevelDifference', 'strand', 'inclusion', 
+#                                    'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE']].rename(
+#             columns={'chr': 0, 'exonStart_0base': 1, 'exonEnd': 2, 'FDR': 3, 'IncLevelDifference': 4, 'strand': 5, 'inclusion': 6, 
+#                      'upstreamES': 7, 'upstreamEE': 8, 'downstreamES': 9, 'downstreamEE': 10})
         print('Using rmats output file')
         de_source = 'rmats'
-        df_rmats[11] = df_rmats[2] - df_rmats[1] # calculate exon length
-        df_rmats[12] = df_rmats[8] - df_rmats[7] # calculate exon length
-        df_rmats[13] = df_rmats[10] - df_rmats[9] #  calculate exon length
+        df_rmats_ctrl[11] = df_rmats_ctrl[2] - df_rmats_ctrl[1] # calculate exon length
+        df_rmats_ctrl[12] = df_rmats_ctrl[8] - df_rmats_ctrl[7] # calculate exon length
+        df_rmats_ctrl[13] = df_rmats_ctrl[10] - df_rmats_ctrl[9] #  calculate exon length
+        
+        df_rmats_const[11] = df_rmats_const[2] - df_rmats_const[1] # calculate exon length
+        df_rmats_const[12] = df_rmats_const[8] - df_rmats_const[7] # calculate exon length
+        df_rmats_const[13] = df_rmats_const[10] - df_rmats_const[9]
+        
+        df_rmats_sil[11] = df_rmats_sil[2] - df_rmats_sil[1] # calculate exon length
+        df_rmats_sil[12] = df_rmats_sil[8] - df_rmats_sil[7] # calculate exon length
+        df_rmats_sil[13] = df_rmats_sil[10] - df_rmats_sil[9]
+        
+        df_rmats_enh[11] = df_rmats_enh[2] - df_rmats_enh[1] # calculate exon length
+        df_rmats_enh[12] = df_rmats_enh[8] - df_rmats_enh[7] # calculate exon length
+        df_rmats_enh[13] = df_rmats_enh[10] - df_rmats_enh[9]
+        
+        df_rmats_silrest[11] = df_rmats_silrest[2] - df_rmats_silrest[1] # calculate exon length
+        df_rmats_silrest[12] = df_rmats_silrest[8] - df_rmats_silrest[7] # calculate exon length
+        df_rmats_silrest[13] = df_rmats_silrest[10] - df_rmats_silrest[9]
+        
+        df_rmats_enhrest[11] = df_rmats_enhrest[2] - df_rmats_enhrest[1] # calculate exon length
+        df_rmats_enhrest[12] = df_rmats_enhrest[8] - df_rmats_enhrest[7] # calculate exon length
+        df_rmats_enhrest[13] = df_rmats_enhrest[10] - df_rmats_enhrest[9]
         
     elif 'DeltaPsi' in rmats.columns:
         rmats = pd.read_csv(de_file, sep='\t', index_col=False)
@@ -156,28 +265,41 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
             df_rmats[3] = 0.0 #non rmats files will probably not have FDR in 4th column so this value will make pass all
             df_rmats[6] = 0.0 #non rmats files will probably not have inclusion in 7th column so this value will make pass all
             df_rmats = df_rmats[[0, 1, 2, 3, 4, 5, 6]]
+
+    df_rmats = df_rmats.reset_index()
+    df_rmats = df_rmats.rename(columns={'index': 14})
+
     if de_source == 'rmats':
-        rmats_3ss, rmats_5ss = get_3ss5ss_exons(df_rmats)
-        print(f'There are: {len(rmats_3ss)} 3ss and {len(rmats_5ss)} 5ss')
+        df_rmats_enh_3ss, df_rmats_enh_5ss = get_3ss5ss_exons(df_rmats_enh)
+        print(f'There are: {len(df_rmats_enh_3ss)} 3ss and {len(df_rmats_enh_5ss)} 5ss enhanced exons')
+        df_rmats_sil_3ss, df_rmats_sil_5ss = get_3ss5ss_exons(df_rmats_sil)
+        print(f'There are: {len(df_rmats_sil_3ss)} 3ss and {len(df_rmats_sil_5ss)} 5ss silenced exons')
+        df_rmats_enhrest_3ss, df_rmats_enhrest_5ss = get_3ss5ss_exons(df_rmats_enhrest)
+        print(f'There are: {len(df_rmats_enhrest_3ss)} 3ss and {len(df_rmats_enhrest_5ss)} 5ss possibly enhanced exons with FDR that is to hight')
+        df_rmats_silrest_3ss, df_rmats_silrest_5ss = get_3ss5ss_exons(df_rmats_silrest)
+        print(f'There are: {len(df_rmats_silrest_3ss)} 3ss and {len(df_rmats_silrest_5ss)} 5ss possibly silenced exons with FDR that is to hight')
+        df_rmats_ctrl_3ss, df_rmats_ctrl_5ss = get_3ss5ss_exons(df_rmats_ctrl)
+        print(f'There are: {len(df_rmats_ctrl_3ss)} 3ss and {len(df_rmats_ctrl_5ss)} 5ss control exons')
+        df_rmats_const_3ss, df_rmats_const_5ss = get_3ss5ss_exons(df_rmats_const)
+        print(f'There are: {len(df_rmats_const_3ss)} 3ss and {len(df_rmats_const_5ss)} 5ss constitutive exons')
+        
         col_rename = {0: 'chr', 1: 'start', 2: 'end', 3: 'name', 4: 'score', 5: 'strand', 6:'inclusion', 7: 'upstream_es', 
-            8: 'upstream_ee', 9: 'downstream_es', 10: 'downstream_ee', 11: 'exon_len', 12: 'upstream_exon_len', 13: 'downstream_exon_len'}
-        df_rmats_ctrl_3ss = rmats_3ss[(rmats_3ss[4] > min_ctrl) & (rmats_3ss[4] < max_ctrl) &
-                                      (rmats_3ss[6] < max_inclusion) & (rmats_3ss[3] > max_fdr)].rename(columns=col_rename)
-        df_rmats_ctrl_5ss = rmats_5ss[(rmats_5ss[4] > min_ctrl) & (rmats_5ss[4] < max_ctrl) &
-                                      (rmats_5ss[6] < max_inclusion) & (rmats_5ss[3] > max_fdr)].rename(columns=col_rename)
-        df_rmats_const_3ss = rmats_3ss[(rmats_3ss[4] > min_ctrl) & (rmats_3ss[4] < max_ctrl) &
-                                      (rmats_3ss[6] > max_inclusion) & (rmats_3ss[3] > max_fdr)].rename(columns=col_rename)
-        df_rmats_const_5ss = rmats_5ss[(rmats_5ss[4] > min_ctrl) & (rmats_5ss[4] < max_ctrl) &
-                                      (rmats_5ss[6] > max_inclusion) & (rmats_5ss[3] > max_fdr)].rename(columns=col_rename)
-        del df_rmats_ctrl_3ss['inclusion']; del df_rmats_ctrl_5ss['inclusion']; del rmats_3ss[6]; del rmats_5ss[6]
-        df_rmats_enh_3ss = rmats_3ss[(rmats_3ss[4] < max_enh) & (rmats_3ss[3] < max_fdr)].rename(columns=col_rename)
-        df_rmats_enh_5ss = rmats_5ss[(rmats_5ss[4] < max_enh) & (rmats_5ss[3] < max_fdr)].rename(columns=col_rename) 
-        df_rmats_sil_3ss = rmats_3ss[(rmats_3ss[4] > min_sil) & (rmats_3ss[3] < max_fdr)].rename(columns=col_rename)
-        df_rmats_sil_5ss = rmats_5ss[(rmats_5ss[4] > min_sil) & (rmats_3ss[3] < max_fdr)].rename(columns=col_rename)
-        df_rmats_enhrest_3ss = rmats_3ss[(rmats_3ss[4] < max_enh) & (rmats_3ss[3] >= max_fdr)].rename(columns=col_rename)
-        df_rmats_enhrest_5ss = rmats_5ss[(rmats_5ss[4] < max_enh) & (rmats_5ss[3] >= max_fdr)].rename(columns=col_rename) 
-        df_rmats_silrest_3ss = rmats_3ss[(rmats_3ss[4] > min_sil) & (rmats_3ss[3] >= max_fdr)].rename(columns=col_rename)
-        df_rmats_silrest_5ss = rmats_5ss[(rmats_5ss[4] > min_sil) & (rmats_3ss[3] >= max_fdr)].rename(columns=col_rename)
+            8: 'upstream_ee', 9: 'downstream_es', 10: 'downstream_ee' , 11: 'exon_len', 12: 'upstream_exon_len', 13: 'downstream_exon_len'
+                     }
+        
+        df_rmats_enh_3ss = df_rmats_enh_3ss.rename(columns=col_rename)
+        df_rmats_enh_5ss = df_rmats_enh_5ss.rename(columns=col_rename)
+        df_rmats_sil_3ss = df_rmats_sil_3ss.rename(columns=col_rename)
+        df_rmats_sil_5ss = df_rmats_sil_5ss.rename(columns=col_rename)
+        df_rmats_enhrest_3ss = df_rmats_enhrest_3ss.rename(columns=col_rename)
+        df_rmats_enhrest_5ss = df_rmats_enhrest_5ss.rename(columns=col_rename)
+        df_rmats_silrest_3ss = df_rmats_silrest_3ss.rename(columns=col_rename)
+        df_rmats_silrest_5ss = df_rmats_silrest_5ss.rename(columns=col_rename)
+        df_rmats_ctrl_3ss = df_rmats_ctrl_3ss.rename(columns=col_rename)
+        df_rmats_ctrl_5ss = df_rmats_ctrl_5ss.rename(columns=col_rename)
+        df_rmats_const_3ss = df_rmats_const_3ss.rename(columns=col_rename)
+        df_rmats_const_5ss = df_rmats_const_5ss.rename(columns=col_rename)
+
         index_selected = df_rmats_ctrl_3ss.index.union(df_rmats_enh_3ss.index.union(
             df_rmats_sil_3ss.index.union(df_rmats_enhrest_3ss.index.union(df_rmats_silrest_3ss.index.union(df_rmats_const_3ss.index)))))
 
@@ -205,20 +327,28 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
 
         index_selected = df_rmats_ctrl_3ss.index.union(df_rmats_enh_3ss.index.union(
             df_rmats_sil_3ss.index.union(df_rmats_enhrest_3ss.index.union(df_rmats_silrest_3ss.index.union(df_rmats_const_3ss.index)))))
-        print(index_selected)
-        
-#     print(f'There are {len(df_rmats_enh_3ss)} enhanced exons, {len(df_rmats_sil_3ss)} silenced exons, ' \
-#           f'{len(df_rmats_ctrl_3ss)} control exons and {len(df_rmats_rest_3ss)} left over exons')
+                
     if len(df_rmats_ctrl_3ss) == 0:
         print('No control exons, try changing filtering parameters or file')
         return
     if len(df_rmats_enh_3ss) == 0 and len(df_rmats_sil_3ss) == 0:
         print('No regulated exons, try changing filtering parameters or file')
         return
-    if de_source == 'rmats':
-        exon_len_all = df_rmats[11]
-    elif de_source == 'whippet':
-        exon_len_all = df_rmats['exon_len']
+#     if de_source == 'rmats':
+#         exon_len_all = df_rmats[11]
+#     elif de_source == 'whippet':
+#         exon_len_all = df_rmats['exon_len']
+    
+    df_rmats_ctrl_3ss['exon_len'] = df_rmats_ctrl_3ss['end'] - df_rmats_ctrl_3ss['start']
+    df_rmats_enh_3ss['exon_len'] = df_rmats_enh_3ss['end'] - df_rmats_enh_3ss['start']
+    df_rmats_sil_3ss['exon_len'] = df_rmats_sil_3ss['end'] - df_rmats_sil_3ss['start']
+    df_rmats_enhrest_3ss['exon_len'] = df_rmats_enhrest_3ss['end'] - df_rmats_enhrest_3ss['start']
+    df_rmats_silrest_3ss['exon_len'] = df_rmats_silrest_3ss['end'] - df_rmats_silrest_3ss['start']
+    df_rmats_const_3ss['exon_len'] = df_rmats_const_3ss['end'] - df_rmats_const_3ss['start']
+    
+    
+    exon_len_all = list(df_rmats_ctrl_3ss['exon_len']) + list(df_rmats_enh_3ss['exon_len'] )+ list(df_rmats_sil_3ss['exon_len'])  \
+        + list(df_rmats_enhrest_3ss['exon_len']) + list(df_rmats_silrest_3ss['exon_len']) + list(df_rmats_const_3ss['exon_len'])
     exon_len_ctrl = df_rmats_ctrl_3ss['exon_len']
     exon_len_enh = df_rmats_enh_3ss['exon_len']
     exon_len_sil = df_rmats_sil_3ss['exon_len']
@@ -230,7 +360,9 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
             'constitutive': exon_len_const, 'all_exons': exon_len_all})
     
     if de_source == 'rmats':
-        upstream_exon_len_all = df_rmats[12]
+        upstream_exon_len_all = list(df_rmats_ctrl_3ss['upstream_exon_len']) + list(df_rmats_enh_3ss['upstream_exon_len']) + \
+            list(df_rmats_sil_3ss['upstream_exon_len']) + list(df_rmats_enhrest_3ss['upstream_exon_len']) + \
+            list(df_rmats_silrest_3ss['upstream_exon_len']) + list(df_rmats_const_3ss['upstream_exon_len'])
         upstream_exon_len_ctrl = df_rmats_ctrl_3ss['upstream_exon_len']
         upstream_exon_len_enh = df_rmats_enh_3ss['upstream_exon_len']
         upstream_exon_len_sil = df_rmats_sil_3ss['upstream_exon_len']
@@ -241,7 +373,9 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
             'silenced_rest': upstream_exon_len_silrest, 'control': upstream_exon_len_ctrl, 
             'constitutive': upstream_exon_len_const, 'all_exons': upstream_exon_len_all})
 
-        downstream_exon_len_all = df_rmats[13]
+        downstream_exon_len_all = list(df_rmats_ctrl_3ss['downstream_exon_len']) + list(df_rmats_enh_3ss['downstream_exon_len']) + \
+            list(df_rmats_sil_3ss['downstream_exon_len']) + list(df_rmats_enhrest_3ss['downstream_exon_len']) + \
+            list(df_rmats_silrest_3ss['downstream_exon_len']) + list(df_rmats_const_3ss['downstream_exon_len'])
         downstream_exon_len_ctrl = df_rmats_ctrl_3ss['downstream_exon_len']
         downstream_exon_len_enh = df_rmats_enh_3ss['downstream_exon_len']
         downstream_exon_len_sil = df_rmats_sil_3ss['downstream_exon_len']
@@ -826,25 +960,1239 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_final_3ss.to_csv(f'{output_dir}/{name}_final_3ss.tsv', sep='\t', index=None)
     df_final_5ss.to_csv(f'{output_dir}/{name}_final_5ss.tsv', sep='\t', index=None)
 
-    df_rmats_enh_3ss['num_xl_3ss'] = enh_3ss_no_xl.values()
-    df_rmats_enh_5ss['num_xl_5ss'] = enh_5ss_no_xl.values()
-    df_rmats_sil_3ss['num_xl_3ss'] = sil_3ss_no_xl.values()
-    df_rmats_sil_5ss['num_xl_5ss'] = sil_5ss_no_xl.values()
-    df_rmats_enhrest_3ss['num_xl_3ss'] = enhrest_3ss_no_xl.values()
-    df_rmats_enhrest_5ss['num_xl_5ss'] = enhrest_5ss_no_xl.values()
-    df_rmats_silrest_3ss['num_xl_3ss'] = silrest_3ss_no_xl.values()
-    df_rmats_silrest_5ss['num_xl_5ss'] = silrest_5ss_no_xl.values()
-    df_rmats_ctrl_3ss['num_xl_3ss'] = ctrl_3ss_no_xl.values()
-    df_rmats_ctrl_5ss['num_xl_5ss'] = ctrl_5ss_no_xl.values()
-    df_rmats_const_3ss['num_xl_3ss'] = const_3ss_no_xl.values()
-    df_rmats_const_5ss['num_xl_5ss'] = const_5ss_no_xl.values()
 
-    df_rmats_enh = df_rmats_enh_3ss[['chr', 'score', 'strand', 'num_xl_3ss']].join(df_rmats_enh_5ss[['num_xl_5ss']], how='inner')
-    df_rmats_sil = df_rmats_sil_3ss[['chr', 'score', 'strand', 'num_xl_3ss']].join(df_rmats_sil_5ss[['num_xl_5ss']], how='inner')
-    df_rmats_enhrest = df_rmats_enhrest_3ss[['chr', 'score', 'strand', 'num_xl_3ss']].join(df_rmats_enhrest_5ss[['num_xl_5ss']], how='inner')
-    df_rmats_silrest = df_rmats_silrest_3ss[['chr', 'score', 'strand', 'num_xl_3ss']].join(df_rmats_silrest_5ss[['num_xl_5ss']], how='inner')
-    df_rmats_ctrl = df_rmats_ctrl_3ss[['chr', 'score', 'strand', 'num_xl_3ss']].join(df_rmats_ctrl_5ss[['num_xl_5ss']], how='inner')
-    df_rmats_const = df_rmats_const_3ss[['chr', 'score', 'strand', 'num_xl_3ss']].join(df_rmats_const_5ss[['num_xl_5ss']], how='inner')
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss.reset_index()
+    rmats_enh_3ss = pbt.BedTool.from_dataframe(df_rmats_enh_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_enh_3ss = rmats_enh_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_enh_3ss = rmats_enh_3ss.to_dataframe(header=None)
+    df_enh_3ss = df_enh_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_enh_3ss_grouped10 = df_enh_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_enh_3ss_grouped_12 = df_enh_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_enh_3ss = df_enh_3ss_grouped10.join(df_enh_3ss_grouped_12).reset_index()
+    df_enh_3ss = df_enh_3ss.set_index(3)
+    df_rmats_enh_3ss_temp = pd.merge(df_rmats_enh_3ss_temp, df_enh_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enh_3ss_temp['index']
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss_temp.set_index(14)
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss.reset_index()
+    rmats_enh_3ss = pbt.BedTool.from_dataframe(df_rmats_enh_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_enh_3ss = rmats_enh_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_enh_3ss = rmats_enh_3ss.to_dataframe(header=None)
+    df_enh_3ss = df_enh_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_enh_3ss_grouped10 = df_enh_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_enh_3ss_grouped_12 = df_enh_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_enh_3ss = df_enh_3ss_grouped10.join(df_enh_3ss_grouped_12).reset_index()
+    df_enh_3ss = df_enh_3ss.set_index(3)
+    df_rmats_enh_3ss_temp = pd.merge(df_rmats_enh_3ss_temp, df_enh_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enh_3ss_temp['index']
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss_temp.set_index(14)
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss.reset_index()
+    rmats_enh_5ss = pbt.BedTool.from_dataframe(df_rmats_enh_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_enh_5ss = rmats_enh_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_enh_5ss = rmats_enh_5ss.to_dataframe(header=None)
+    df_enh_5ss = df_enh_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_enh_5ss_grouped10 = df_enh_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_enh_5ss_grouped_12 = df_enh_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_enh_5ss = df_enh_5ss_grouped10.join(df_enh_5ss_grouped_12).reset_index()
+    df_enh_5ss = df_enh_5ss.set_index(3)
+    df_rmats_enh_5ss_temp = pd.merge(df_rmats_enh_5ss_temp, df_enh_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enh_5ss_temp['index']
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss_temp.set_index(14)
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_enh = df_rmats_enh_5ss_temp.join(df_rmats_enh_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+
+
+    df_rmats_enh2 = df_rmats_enh[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+       'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_enh2 = df_rmats_enh2.reset_index()
+
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '+') & (2*window > (df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss'])) & \
+                      ((df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss']) > window),
+                      'start'] = df_rmats_enh2['start5ss'] - window
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '+') & (2*window > (df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss'])) & \
+                      ((df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss']) > window),
+                      'end'] = df_rmats_enh2['start3ss'] + window
+
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '-') & (2*window > (df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss'])) & \
+                      ((df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss']) > window),
+                      'start'] = df_rmats_enh2['start3ss'] - window
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '-') & (2*window > (df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss'])) & \
+                      ((df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss']) > window),
+                      'end'] = df_rmats_enh2['start5ss'] + window
+
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '+') & ((df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss']) < window),
+                      'start'] = df_rmats_enh2['start3ss']
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '+') & ((df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss']) < window),
+                      'end'] = df_rmats_enh2['start5ss']
+
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '-') & ((df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss']) < window),
+                      'start'] = df_rmats_enh2['start5ss']
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '-') & ((df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss']) < window),
+                      'end'] = df_rmats_enh2['start3ss']
+
+    df_rmats_enh2['len'] = df_rmats_enh2['end'] - df_rmats_enh2['start']
+
+    df_rmats_enh2['diff'] = abs(df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss'])
+
+    df_rmats_enh2 = df_rmats_enh2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_enh2 = df_rmats_enh2[~(df_rmats_enh2['start'].isna() | df_rmats_enh2['end'].isna())]
+
+    df_rmats_enh2['start'] = df_rmats_enh2['start'].astype(int)
+    df_rmats_enh2['end'] = df_rmats_enh2['end'].astype(int)
+
+    rmats_enh2 = pbt.BedTool.from_dataframe(df_rmats_enh2)
+    rmats_enh2 = rmats_enh2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_enh2 = rmats_enh2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_enh2['base_coverage_5ss']
+    del df_rmats_enh2['chrom2']
+    del df_rmats_enh2['start2']
+    del df_rmats_enh2['end2']
+    del df_rmats_enh2['useless']
+    del df_rmats_enh2['strand2']
+
+    df_rmats_enh2_grouped10 = df_rmats_enh2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_enh2_grouped12 = df_rmats_enh2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_enh2 = df_rmats_enh2_grouped10.join(df_rmats_enh2_grouped12).reset_index()
+    df_rmats_enh2 = df_rmats_enh2.set_index('index')
+
+    df_rmats_enh_overlap = df_rmats_enh.join(df_rmats_enh2)
+
+    df_rmats_enh_overlap = df_rmats_enh_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_enh_overlap.loc[df_rmats_enh_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_enh_overlap.loc[df_rmats_enh_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_enh_overlap.loc[df_rmats_enh_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_enh_overlap['cDNA_coverage_5ss'] = df_rmats_enh_overlap['cDNA_coverage_5ss'] - df_rmats_enh_overlap['overlap_score']
+    df_rmats_enh_overlap['cDNA_coverage_3ss'] = df_rmats_enh_overlap['cDNA_coverage_3ss'] - df_rmats_enh_overlap['overlap_score']
+    df_rmats_enh_overlap['base_coverage_5ss'] = df_rmats_enh_overlap['base_coverage_5ss'] - df_rmats_enh_overlap['overlap_base']
+    df_rmats_enh_overlap['base_coverage_3ss'] = df_rmats_enh_overlap['base_coverage_3ss'] - df_rmats_enh_overlap['overlap_base']
+
+    df_rmats_enh = df_rmats_enh_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss.reset_index()
+    rmats_sil_3ss = pbt.BedTool.from_dataframe(df_rmats_sil_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_sil_3ss = rmats_sil_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_sil_3ss = rmats_sil_3ss.to_dataframe(header=None)
+    df_sil_3ss = df_sil_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_sil_3ss_grouped10 = df_sil_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_sil_3ss_grouped_12 = df_sil_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_sil_3ss = df_sil_3ss_grouped10.join(df_sil_3ss_grouped_12).reset_index()
+    df_sil_3ss = df_sil_3ss.set_index(3)
+    df_rmats_sil_3ss_temp = pd.merge(df_rmats_sil_3ss_temp, df_sil_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_sil_3ss_temp['index']
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp.set_index(14)
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss.reset_index()
+    rmats_sil_5ss = pbt.BedTool.from_dataframe(df_rmats_sil_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_sil_5ss = rmats_sil_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_sil_5ss = rmats_sil_5ss.to_dataframe(header=None)
+    df_sil_5ss = df_sil_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_sil_5ss_grouped10 = df_sil_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_sil_5ss_grouped_12 = df_sil_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_sil_5ss = df_sil_5ss_grouped10.join(df_sil_5ss_grouped_12).reset_index()
+    df_sil_5ss = df_sil_5ss.set_index(3)
+    df_rmats_sil_5ss_temp = pd.merge(df_rmats_sil_5ss_temp, df_sil_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_sil_5ss_temp['index']
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss_temp.set_index(14)
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_sil = df_rmats_sil_5ss_temp.join(df_rmats_sil_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+    
+    df_rmats_sil2 = df_rmats_sil[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+       'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_sil2 = df_rmats_sil2.reset_index()
+
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '+') & (2*window > (df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss'])) & \
+                      ((df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss']) > window),
+                      'start'] = df_rmats_sil2['start5ss'] - window
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '+') & (2*window > (df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss'])) & \
+                      ((df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss']) > window),
+                      'end'] = df_rmats_sil2['start3ss'] + window
+
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '-') & (2*window > (df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss'])) & \
+                      ((df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss']) > window),
+                      'start'] = df_rmats_sil2['start3ss'] - window
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '-') & (2*window > (df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss'])) & \
+                      ((df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss']) > window),
+                      'end'] = df_rmats_sil2['start5ss'] + window
+
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '+') & ((df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss']) < window),
+                      'start'] = df_rmats_sil2['start3ss']
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '+') & ((df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss']) < window),
+                      'end'] = df_rmats_sil2['start5ss']
+
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '-') & ((df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss']) < window),
+                      'start'] = df_rmats_sil2['start5ss']
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '-') & ((df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss']) < window),
+                      'end'] = df_rmats_sil2['start3ss']
+
+    df_rmats_sil2['len'] = df_rmats_sil2['end'] - df_rmats_sil2['start']
+
+    df_rmats_sil2['diff'] = abs(df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss'])
+
+    df_rmats_sil2 = df_rmats_sil2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_sil2 = df_rmats_sil2[~(df_rmats_sil2['start'].isna() | df_rmats_sil2['end'].isna())]
+
+    df_rmats_sil2['start'] = df_rmats_sil2['start'].astype(int)
+    df_rmats_sil2['end'] = df_rmats_sil2['end'].astype(int)
+
+    rmats_sil2 = pbt.BedTool.from_dataframe(df_rmats_sil2)
+    rmats_sil2 = rmats_sil2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_sil2 = rmats_sil2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_sil2['base_coverage_5ss']
+    del df_rmats_sil2['chrom2']
+    del df_rmats_sil2['start2']
+    del df_rmats_sil2['end2']
+    del df_rmats_sil2['useless']
+    del df_rmats_sil2['strand2']
+
+    df_rmats_sil2_grouped10 = df_rmats_sil2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_sil2_grouped12 = df_rmats_sil2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_sil2 = df_rmats_sil2_grouped10.join(df_rmats_sil2_grouped12).reset_index()
+    df_rmats_sil2 = df_rmats_sil2.set_index('index')
+
+    df_rmats_sil_overlap = df_rmats_sil.join(df_rmats_sil2)
+
+    df_rmats_sil_overlap = df_rmats_sil_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_sil_overlap.loc[df_rmats_sil_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_sil_overlap.loc[df_rmats_sil_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_sil_overlap.loc[df_rmats_sil_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_sil_overlap['cDNA_coverage_5ss'] = df_rmats_sil_overlap['cDNA_coverage_5ss'] - df_rmats_sil_overlap['overlap_score']
+    df_rmats_sil_overlap['cDNA_coverage_3ss'] = df_rmats_sil_overlap['cDNA_coverage_3ss'] - df_rmats_sil_overlap['overlap_score']
+    df_rmats_sil_overlap['base_coverage_5ss'] = df_rmats_sil_overlap['base_coverage_5ss'] - df_rmats_sil_overlap['overlap_base']
+    df_rmats_sil_overlap['base_coverage_3ss'] = df_rmats_sil_overlap['base_coverage_3ss'] - df_rmats_sil_overlap['overlap_base']
+
+    df_rmats_sil = df_rmats_sil_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss.reset_index()
+    rmats_enhrest_3ss = pbt.BedTool.from_dataframe(df_rmats_enhrest_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_enhrest_3ss = rmats_enhrest_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_enhrest_3ss = rmats_enhrest_3ss.to_dataframe(header=None)
+    df_enhrest_3ss = df_enhrest_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_enhrest_3ss_grouped10 = df_enhrest_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_enhrest_3ss_grouped_12 = df_enhrest_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_enhrest_3ss = df_enhrest_3ss_grouped10.join(df_enhrest_3ss_grouped_12).reset_index()
+    df_enhrest_3ss = df_enhrest_3ss.set_index(3)
+    df_rmats_enhrest_3ss_temp = pd.merge(df_rmats_enhrest_3ss_temp, df_enhrest_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enhrest_3ss_temp['index']
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss_temp.set_index(14)
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss.reset_index()
+    rmats_enhrest_5ss = pbt.BedTool.from_dataframe(df_rmats_enhrest_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_enhrest_5ss = rmats_enhrest_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_enhrest_5ss = rmats_enhrest_5ss.to_dataframe(header=None)
+    df_enhrest_5ss = df_enhrest_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_enhrest_5ss_grouped10 = df_enhrest_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_enhrest_5ss_grouped_12 = df_enhrest_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_enhrest_5ss = df_enhrest_5ss_grouped10.join(df_enhrest_5ss_grouped_12).reset_index()
+    df_enhrest_5ss = df_enhrest_5ss.set_index(3)
+    df_rmats_enhrest_5ss_temp = pd.merge(df_rmats_enhrest_5ss_temp, df_enhrest_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enhrest_5ss_temp['index']
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss_temp.set_index(14)
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_enhrest = df_rmats_enhrest_5ss_temp.join(df_rmats_enhrest_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+
+    df_rmats_enhrest2 = df_rmats_enhrest[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+        'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_enhrest2 = df_rmats_enhrest2.reset_index()
+
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '+') & (2*window > (df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss'])) & \
+                    ((df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss']) > window),
+                    'start'] = df_rmats_enhrest2['start5ss'] - window
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '+') & (2*window > (df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss'])) & \
+                    ((df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss']) > window),
+                    'end'] = df_rmats_enhrest2['start3ss'] + window
+
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '-') & (2*window > (df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss'])) & \
+                    ((df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss']) > window),
+                    'start'] = df_rmats_enhrest2['start3ss'] - window
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '-') & (2*window > (df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss'])) & \
+                    ((df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss']) > window),
+                    'end'] = df_rmats_enhrest2['start5ss'] + window
+
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '+') & ((df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss']) < window),
+                    'start'] = df_rmats_enhrest2['start3ss']
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '+') & ((df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss']) < window),
+                    'end'] = df_rmats_enhrest2['start5ss']
+
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '-') & ((df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss']) < window),
+                    'start'] = df_rmats_enhrest2['start5ss']
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '-') & ((df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss']) < window),
+                    'end'] = df_rmats_enhrest2['start3ss']
+
+    df_rmats_enhrest2['len'] = df_rmats_enhrest2['end'] - df_rmats_enhrest2['start']
+
+    df_rmats_enhrest2['diff'] = abs(df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss'])
+
+    df_rmats_enhrest2 = df_rmats_enhrest2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_enhrest2 = df_rmats_enhrest2[~(df_rmats_enhrest2['start'].isna() | df_rmats_enhrest2['end'].isna())]
+
+    df_rmats_enhrest2['start'] = df_rmats_enhrest2['start'].astype(int)
+    df_rmats_enhrest2['end'] = df_rmats_enhrest2['end'].astype(int)
+
+    rmats_enhrest2 = pbt.BedTool.from_dataframe(df_rmats_enhrest2)
+    rmats_enhrest2 = rmats_enhrest2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_enhrest2 = rmats_enhrest2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_enhrest2['base_coverage_5ss']
+    del df_rmats_enhrest2['chrom2']
+    del df_rmats_enhrest2['start2']
+    del df_rmats_enhrest2['end2']
+    del df_rmats_enhrest2['useless']
+    del df_rmats_enhrest2['strand2']
+
+    df_rmats_enhrest2_grouped10 = df_rmats_enhrest2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_enhrest2_grouped12 = df_rmats_enhrest2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_enhrest2 = df_rmats_enhrest2_grouped10.join(df_rmats_enhrest2_grouped12).reset_index()
+    df_rmats_enhrest2 = df_rmats_enhrest2.set_index('index')
+
+    df_rmats_enhrest_overlap = df_rmats_enhrest.join(df_rmats_enhrest2)
+
+    df_rmats_enhrest_overlap = df_rmats_enhrest_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_enhrest_overlap.loc[df_rmats_enhrest_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_enhrest_overlap.loc[df_rmats_enhrest_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_enhrest_overlap.loc[df_rmats_enhrest_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_enhrest_overlap['cDNA_coverage_5ss'] = df_rmats_enhrest_overlap['cDNA_coverage_5ss'] - df_rmats_enhrest_overlap['overlap_score']
+    df_rmats_enhrest_overlap['cDNA_coverage_3ss'] = df_rmats_enhrest_overlap['cDNA_coverage_3ss'] - df_rmats_enhrest_overlap['overlap_score']
+    df_rmats_enhrest_overlap['base_coverage_5ss'] = df_rmats_enhrest_overlap['base_coverage_5ss'] - df_rmats_enhrest_overlap['overlap_base']
+    df_rmats_enhrest_overlap['base_coverage_3ss'] = df_rmats_enhrest_overlap['base_coverage_3ss'] - df_rmats_enhrest_overlap['overlap_base']
+
+    df_rmats_enhrest = df_rmats_enhrest_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+    
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss.reset_index()
+    rmats_silrest_3ss = pbt.BedTool.from_dataframe(df_rmats_silrest_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_silrest_3ss = rmats_silrest_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_silrest_3ss = rmats_silrest_3ss.to_dataframe(header=None)
+    df_silrest_3ss = df_silrest_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_silrest_3ss_grouped10 = df_silrest_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_silrest_3ss_grouped_12 = df_silrest_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_silrest_3ss = df_silrest_3ss_grouped10.join(df_silrest_3ss_grouped_12).reset_index()
+    df_silrest_3ss = df_silrest_3ss.set_index(3)
+    df_rmats_silrest_3ss_temp = pd.merge(df_rmats_silrest_3ss_temp, df_silrest_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_silrest_3ss_temp['index']
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss_temp.set_index(14)
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss.reset_index()
+    rmats_silrest_5ss = pbt.BedTool.from_dataframe(df_rmats_silrest_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_silrest_5ss = rmats_silrest_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_silrest_5ss = rmats_silrest_5ss.to_dataframe(header=None)
+    df_silrest_5ss = df_silrest_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_silrest_5ss_grouped10 = df_silrest_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_silrest_5ss_grouped_12 = df_silrest_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_silrest_5ss = df_silrest_5ss_grouped10.join(df_silrest_5ss_grouped_12).reset_index()
+    df_silrest_5ss = df_silrest_5ss.set_index(3)
+    df_rmats_silrest_5ss_temp = pd.merge(df_rmats_silrest_5ss_temp, df_silrest_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_silrest_5ss_temp['index']
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss_temp.set_index(14)
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_silrest = df_rmats_silrest_5ss_temp.join(df_rmats_silrest_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+    
+    df_rmats_silrest2 = df_rmats_silrest[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+        'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_silrest2 = df_rmats_silrest2.reset_index()
+
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '+') & (2*window > (df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss'])) & \
+                    ((df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss']) > window),
+                    'start'] = df_rmats_silrest2['start5ss'] - window
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '+') & (2*window > (df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss'])) & \
+                    ((df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss']) > window),
+                    'end'] = df_rmats_silrest2['start3ss'] + window
+
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '-') & (2*window > (df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss'])) & \
+                    ((df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss']) > window),
+                    'start'] = df_rmats_silrest2['start3ss'] - window
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '-') & (2*window > (df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss'])) & \
+                    ((df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss']) > window),
+                    'end'] = df_rmats_silrest2['start5ss'] + window
+
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '+') & ((df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss']) < window),
+                    'start'] = df_rmats_silrest2['start3ss']
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '+') & ((df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss']) < window),
+                    'end'] = df_rmats_silrest2['start5ss']
+
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '-') & ((df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss']) < window),
+                    'start'] = df_rmats_silrest2['start5ss']
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '-') & ((df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss']) < window),
+                    'end'] = df_rmats_silrest2['start3ss']
+
+    df_rmats_silrest2['len'] = df_rmats_silrest2['end'] - df_rmats_silrest2['start']
+
+    df_rmats_silrest2['diff'] = abs(df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss'])
+
+    df_rmats_silrest2 = df_rmats_silrest2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_silrest2 = df_rmats_silrest2[~(df_rmats_silrest2['start'].isna() | df_rmats_silrest2['end'].isna())]
+
+    df_rmats_silrest2['start'] = df_rmats_silrest2['start'].astype(int)
+    df_rmats_silrest2['end'] = df_rmats_silrest2['end'].astype(int)
+
+    rmats_silrest2 = pbt.BedTool.from_dataframe(df_rmats_silrest2)
+    rmats_silrest2 = rmats_silrest2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_silrest2 = rmats_silrest2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_silrest2['base_coverage_5ss']
+    del df_rmats_silrest2['chrom2']
+    del df_rmats_silrest2['start2']
+    del df_rmats_silrest2['end2']
+    del df_rmats_silrest2['useless']
+    del df_rmats_silrest2['strand2']
+
+    df_rmats_silrest2_grouped10 = df_rmats_silrest2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_silrest2_grouped12 = df_rmats_silrest2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_silrest2 = df_rmats_silrest2_grouped10.join(df_rmats_silrest2_grouped12).reset_index()
+    df_rmats_silrest2 = df_rmats_silrest2.set_index('index')
+
+    df_rmats_silrest_overlap = df_rmats_silrest.join(df_rmats_silrest2)
+
+    df_rmats_silrest_overlap = df_rmats_silrest_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_silrest_overlap.loc[df_rmats_silrest_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_silrest_overlap.loc[df_rmats_silrest_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_silrest_overlap.loc[df_rmats_silrest_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_silrest_overlap['cDNA_coverage_5ss'] = df_rmats_silrest_overlap['cDNA_coverage_5ss'] - df_rmats_silrest_overlap['overlap_score']
+    df_rmats_silrest_overlap['cDNA_coverage_3ss'] = df_rmats_silrest_overlap['cDNA_coverage_3ss'] - df_rmats_silrest_overlap['overlap_score']
+    df_rmats_silrest_overlap['base_coverage_5ss'] = df_rmats_silrest_overlap['base_coverage_5ss'] - df_rmats_silrest_overlap['overlap_base']
+    df_rmats_silrest_overlap['base_coverage_3ss'] = df_rmats_silrest_overlap['base_coverage_3ss'] - df_rmats_silrest_overlap['overlap_base']
+
+    df_rmats_silrest = df_rmats_silrest_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss.reset_index()
+    rmats_ctrl_3ss = pbt.BedTool.from_dataframe(df_rmats_ctrl_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_ctrl_3ss = rmats_ctrl_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_ctrl_3ss = rmats_ctrl_3ss.to_dataframe(header=None)
+    df_ctrl_3ss = df_ctrl_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_ctrl_3ss_grouped10 = df_ctrl_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_ctrl_3ss_grouped_12 = df_ctrl_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_ctrl_3ss = df_ctrl_3ss_grouped10.join(df_ctrl_3ss_grouped_12).reset_index()
+    df_ctrl_3ss = df_ctrl_3ss.set_index(3)
+    df_rmats_ctrl_3ss_temp = pd.merge(df_rmats_ctrl_3ss_temp, df_ctrl_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_ctrl_3ss_temp['index']
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss_temp.set_index(14)
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss.reset_index()
+    rmats_ctrl_5ss = pbt.BedTool.from_dataframe(df_rmats_ctrl_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_ctrl_5ss = rmats_ctrl_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_ctrl_5ss = rmats_ctrl_5ss.to_dataframe(header=None)
+    df_ctrl_5ss = df_ctrl_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_ctrl_5ss_grouped10 = df_ctrl_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_ctrl_5ss_grouped_12 = df_ctrl_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_ctrl_5ss = df_ctrl_5ss_grouped10.join(df_ctrl_5ss_grouped_12).reset_index()
+    df_ctrl_5ss = df_ctrl_5ss.set_index(3)
+    df_rmats_ctrl_5ss_temp = pd.merge(df_rmats_ctrl_5ss_temp, df_ctrl_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_ctrl_5ss_temp['index']
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss_temp.set_index(14)
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_ctrl = df_rmats_ctrl_5ss_temp.join(df_rmats_ctrl_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+    
+    df_rmats_ctrl2 = df_rmats_ctrl[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+        'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_ctrl2 = df_rmats_ctrl2.reset_index()
+
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '+') & (2*window > (df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss'])) & \
+                    ((df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss']) > window),
+                    'start'] = df_rmats_ctrl2['start5ss'] - window
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '+') & (2*window > (df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss'])) & \
+                    ((df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss']) > window),
+                    'end'] = df_rmats_ctrl2['start3ss'] + window
+
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '-') & (2*window > (df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss'])) & \
+                    ((df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss']) > window),
+                    'start'] = df_rmats_ctrl2['start3ss'] - window
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '-') & (2*window > (df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss'])) & \
+                    ((df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss']) > window),
+                    'end'] = df_rmats_ctrl2['start5ss'] + window
+
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '+') & ((df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss']) < window),
+                    'start'] = df_rmats_ctrl2['start3ss']
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '+') & ((df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss']) < window),
+                    'end'] = df_rmats_ctrl2['start5ss']
+
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '-') & ((df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss']) < window),
+                    'start'] = df_rmats_ctrl2['start5ss']
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '-') & ((df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss']) < window),
+                    'end'] = df_rmats_ctrl2['start3ss']
+
+    df_rmats_ctrl2['len'] = df_rmats_ctrl2['end'] - df_rmats_ctrl2['start']
+
+    df_rmats_ctrl2['diff'] = abs(df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss'])
+
+    df_rmats_ctrl2 = df_rmats_ctrl2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_ctrl2 = df_rmats_ctrl2[~(df_rmats_ctrl2['start'].isna() | df_rmats_ctrl2['end'].isna())]
+
+    df_rmats_ctrl2['start'] = df_rmats_ctrl2['start'].astype(int)
+    df_rmats_ctrl2['end'] = df_rmats_ctrl2['end'].astype(int)
+
+    rmats_ctrl2 = pbt.BedTool.from_dataframe(df_rmats_ctrl2)
+    rmats_ctrl2 = rmats_ctrl2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_ctrl2 = rmats_ctrl2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_ctrl2['base_coverage_5ss']
+    del df_rmats_ctrl2['chrom2']
+    del df_rmats_ctrl2['start2']
+    del df_rmats_ctrl2['end2']
+    del df_rmats_ctrl2['useless']
+    del df_rmats_ctrl2['strand2']
+
+    df_rmats_ctrl2_grouped10 = df_rmats_ctrl2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_ctrl2_grouped12 = df_rmats_ctrl2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_ctrl2 = df_rmats_ctrl2_grouped10.join(df_rmats_ctrl2_grouped12).reset_index()
+    df_rmats_ctrl2 = df_rmats_ctrl2.set_index('index')
+
+    df_rmats_ctrl_overlap = df_rmats_ctrl.join(df_rmats_ctrl2)
+
+    df_rmats_ctrl_overlap = df_rmats_ctrl_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_ctrl_overlap.loc[df_rmats_ctrl_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_ctrl_overlap.loc[df_rmats_ctrl_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_ctrl_overlap.loc[df_rmats_ctrl_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_ctrl_overlap['cDNA_coverage_5ss'] = df_rmats_ctrl_overlap['cDNA_coverage_5ss'] - df_rmats_ctrl_overlap['overlap_score']
+    df_rmats_ctrl_overlap['cDNA_coverage_3ss'] = df_rmats_ctrl_overlap['cDNA_coverage_3ss'] - df_rmats_ctrl_overlap['overlap_score']
+    df_rmats_ctrl_overlap['base_coverage_5ss'] = df_rmats_ctrl_overlap['base_coverage_5ss'] - df_rmats_ctrl_overlap['overlap_base']
+    df_rmats_ctrl_overlap['base_coverage_3ss'] = df_rmats_ctrl_overlap['base_coverage_3ss'] - df_rmats_ctrl_overlap['overlap_base']
+
+    df_rmats_ctrl = df_rmats_ctrl_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+
+    df_rmats_const_3ss_temp = df_rmats_const_3ss.reset_index()
+    rmats_const_3ss = pbt.BedTool.from_dataframe(df_rmats_const_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_const_3ss = rmats_const_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_const_3ss = rmats_const_3ss.to_dataframe(header=None)
+    df_const_3ss = df_const_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_const_3ss_grouped10 = df_const_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_const_3ss_grouped_12 = df_const_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_const_3ss = df_const_3ss_grouped10.join(df_const_3ss_grouped_12).reset_index()
+    df_const_3ss = df_const_3ss.set_index(3)
+    df_rmats_const_3ss_temp = pd.merge(df_rmats_const_3ss_temp, df_const_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_const_3ss_temp['index']
+    df_rmats_const_3ss_temp = df_rmats_const_3ss_temp.set_index(14)
+    df_rmats_const_3ss_temp = df_rmats_const_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_const_5ss_temp = df_rmats_const_5ss.reset_index()
+    rmats_const_5ss = pbt.BedTool.from_dataframe(df_rmats_const_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_const_5ss = rmats_const_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_const_5ss = rmats_const_5ss.to_dataframe(header=None)
+    df_const_5ss = df_const_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_const_5ss_grouped10 = df_const_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_const_5ss_grouped_12 = df_const_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_const_5ss = df_const_5ss_grouped10.join(df_const_5ss_grouped_12).reset_index()
+    df_const_5ss = df_const_5ss.set_index(3)
+    df_rmats_const_5ss_temp = pd.merge(df_rmats_const_5ss_temp, df_const_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_const_5ss_temp['index']
+    df_rmats_const_5ss_temp = df_rmats_const_5ss_temp.set_index(14)
+    df_rmats_const_5ss_temp = df_rmats_const_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_const = df_rmats_const_5ss_temp.join(df_rmats_const_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+    
+    df_rmats_const2 = df_rmats_const[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+        'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_const2 = df_rmats_const2.reset_index()
+
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '+') & (2*window > (df_rmats_const2['start5ss'] - df_rmats_const2['start3ss'])) & \
+                    ((df_rmats_const2['start5ss'] - df_rmats_const2['start3ss']) > window),
+                    'start'] = df_rmats_const2['start5ss'] - window
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '+') & (2*window > (df_rmats_const2['start5ss'] - df_rmats_const2['start3ss'])) & \
+                    ((df_rmats_const2['start5ss'] - df_rmats_const2['start3ss']) > window),
+                    'end'] = df_rmats_const2['start3ss'] + window
+
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '-') & (2*window > (df_rmats_const2['start3ss'] - df_rmats_const2['start5ss'])) & \
+                    ((df_rmats_const2['start3ss'] - df_rmats_const2['start5ss']) > window),
+                    'start'] = df_rmats_const2['start3ss'] - window
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '-') & (2*window > (df_rmats_const2['start3ss'] - df_rmats_const2['start5ss'])) & \
+                    ((df_rmats_const2['start3ss'] - df_rmats_const2['start5ss']) > window),
+                    'end'] = df_rmats_const2['start5ss'] + window
+
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '+') & ((df_rmats_const2['start5ss'] - df_rmats_const2['start3ss']) < window),
+                    'start'] = df_rmats_const2['start3ss']
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '+') & ((df_rmats_const2['start5ss'] - df_rmats_const2['start3ss']) < window),
+                    'end'] = df_rmats_const2['start5ss']
+
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '-') & ((df_rmats_const2['start3ss'] - df_rmats_const2['start5ss']) < window),
+                    'start'] = df_rmats_const2['start5ss']
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '-') & ((df_rmats_const2['start3ss'] - df_rmats_const2['start5ss']) < window),
+                    'end'] = df_rmats_const2['start3ss']
+
+    df_rmats_const2['len'] = df_rmats_const2['end'] - df_rmats_const2['start']
+
+    df_rmats_const2['diff'] = abs(df_rmats_const2['start3ss'] - df_rmats_const2['start5ss'])
+
+    df_rmats_const2 = df_rmats_const2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_const2 = df_rmats_const2[~(df_rmats_const2['start'].isna() | df_rmats_const2['end'].isna())]
+
+    df_rmats_const2['start'] = df_rmats_const2['start'].astype(int)
+    df_rmats_const2['end'] = df_rmats_const2['end'].astype(int)
+
+    rmats_const2 = pbt.BedTool.from_dataframe(df_rmats_const2)
+    rmats_const2 = rmats_const2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_const2 = rmats_const2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_const2['base_coverage_5ss']
+    del df_rmats_const2['chrom2']
+    del df_rmats_const2['start2']
+    del df_rmats_const2['end2']
+    del df_rmats_const2['useless']
+    del df_rmats_const2['strand2']
+
+    df_rmats_const2_grouped10 = df_rmats_const2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_const2_grouped12 = df_rmats_const2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_const2 = df_rmats_const2_grouped10.join(df_rmats_const2_grouped12).reset_index()
+    df_rmats_const2 = df_rmats_const2.set_index('index')
+
+    df_rmats_const_overlap = df_rmats_const.join(df_rmats_const2)
+
+    df_rmats_const_overlap = df_rmats_const_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_const_overlap.loc[df_rmats_const_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_const_overlap.loc[df_rmats_const_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_const_overlap.loc[df_rmats_const_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_const_overlap['cDNA_coverage_5ss'] = df_rmats_const_overlap['cDNA_coverage_5ss'] - df_rmats_const_overlap['overlap_score']
+    df_rmats_const_overlap['cDNA_coverage_3ss'] = df_rmats_const_overlap['cDNA_coverage_3ss'] - df_rmats_const_overlap['overlap_score']
+    df_rmats_const_overlap['base_coverage_5ss'] = df_rmats_const_overlap['base_coverage_5ss'] - df_rmats_const_overlap['overlap_base']
+    df_rmats_const_overlap['base_coverage_3ss'] = df_rmats_const_overlap['base_coverage_3ss'] - df_rmats_const_overlap['overlap_base']
+
+    df_rmats_const = df_rmats_const_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+    df_rmats_enh_3ss_temp = df_rmats_enh_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss.reset_index()
+    rmats_enh_5ss = pbt.BedTool.from_dataframe(df_rmats_enh_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_enh_5ss = rmats_enh_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_enh_5ss = rmats_enh_5ss.to_dataframe(header=None)
+    df_enh_5ss = df_enh_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_enh_5ss_grouped10 = df_enh_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_enh_5ss_grouped_12 = df_enh_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_enh_5ss = df_enh_5ss_grouped10.join(df_enh_5ss_grouped_12).reset_index()
+    df_enh_5ss = df_enh_5ss.set_index(3)
+    df_rmats_enh_5ss_temp = pd.merge(df_rmats_enh_5ss_temp, df_enh_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enh_5ss_temp['index']
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss_temp.set_index(14)
+    df_rmats_enh_5ss_temp = df_rmats_enh_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_enh = df_rmats_enh_5ss_temp.join(df_rmats_enh_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+
+
+    df_rmats_enh2 = df_rmats_enh[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+       'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_enh2 = df_rmats_enh2.reset_index()
+
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '+') & (2*window > (df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss'])) & \
+                      ((df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss']) > window),
+                      'start'] = df_rmats_enh2['start5ss'] - window
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '+') & (2*window > (df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss'])) & \
+                      ((df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss']) > window),
+                      'end'] = df_rmats_enh2['start3ss'] + window
+
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '-') & (2*window > (df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss'])) & \
+                      ((df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss']) > window),
+                      'start'] = df_rmats_enh2['start3ss'] - window
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '-') & (2*window > (df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss'])) & \
+                      ((df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss']) > window),
+                      'end'] = df_rmats_enh2['start5ss'] + window
+
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '+') & ((df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss']) < window),
+                      'start'] = df_rmats_enh2['start3ss']
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '+') & ((df_rmats_enh2['start5ss'] - df_rmats_enh2['start3ss']) < window),
+                      'end'] = df_rmats_enh2['start5ss']
+
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '-') & ((df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss']) < window),
+                      'start'] = df_rmats_enh2['start5ss']
+    df_rmats_enh2.loc[(df_rmats_enh2['strand5ss'] == '-') & ((df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss']) < window),
+                      'end'] = df_rmats_enh2['start3ss']
+
+    df_rmats_enh2['len'] = df_rmats_enh2['end'] - df_rmats_enh2['start']
+
+    df_rmats_enh2['diff'] = abs(df_rmats_enh2['start3ss'] - df_rmats_enh2['start5ss'])
+
+    df_rmats_enh2 = df_rmats_enh2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_enh2 = df_rmats_enh2[~(df_rmats_enh2['start'].isna() | df_rmats_enh2['end'].isna())]
+
+    df_rmats_enh2['start'] = df_rmats_enh2['start'].astype(int)
+    df_rmats_enh2['end'] = df_rmats_enh2['end'].astype(int)
+
+    rmats_enh2 = pbt.BedTool.from_dataframe(df_rmats_enh2)
+    rmats_enh2 = rmats_enh2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_enh2 = rmats_enh2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_enh2['base_coverage_5ss']
+    del df_rmats_enh2['chrom2']
+    del df_rmats_enh2['start2']
+    del df_rmats_enh2['end2']
+    del df_rmats_enh2['useless']
+    del df_rmats_enh2['strand2']
+
+    df_rmats_enh2_grouped10 = df_rmats_enh2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_enh2_grouped12 = df_rmats_enh2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_enh2 = df_rmats_enh2_grouped10.join(df_rmats_enh2_grouped12).reset_index()
+    df_rmats_enh2 = df_rmats_enh2.set_index('index')
+
+    df_rmats_enh_overlap = df_rmats_enh.join(df_rmats_enh2)
+
+    df_rmats_enh_overlap = df_rmats_enh_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_enh_overlap.loc[df_rmats_enh_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_enh_overlap.loc[df_rmats_enh_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_enh_overlap.loc[df_rmats_enh_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_enh_overlap['cDNA_coverage_5ss'] = df_rmats_enh_overlap['cDNA_coverage_5ss'] - df_rmats_enh_overlap['overlap_score']
+    df_rmats_enh_overlap['cDNA_coverage_3ss'] = df_rmats_enh_overlap['cDNA_coverage_3ss'] - df_rmats_enh_overlap['overlap_score']
+    df_rmats_enh_overlap['base_coverage_5ss'] = df_rmats_enh_overlap['base_coverage_5ss'] - df_rmats_enh_overlap['overlap_base']
+    df_rmats_enh_overlap['base_coverage_3ss'] = df_rmats_enh_overlap['base_coverage_3ss'] - df_rmats_enh_overlap['overlap_base']
+
+    df_rmats_enh = df_rmats_enh_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss.reset_index()
+    rmats_sil_3ss = pbt.BedTool.from_dataframe(df_rmats_sil_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_sil_3ss = rmats_sil_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_sil_3ss = rmats_sil_3ss.to_dataframe(header=None)
+    df_sil_3ss = df_sil_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_sil_3ss_grouped10 = df_sil_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_sil_3ss_grouped_12 = df_sil_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_sil_3ss = df_sil_3ss_grouped10.join(df_sil_3ss_grouped_12).reset_index()
+    df_sil_3ss = df_sil_3ss.set_index(3)
+    df_rmats_sil_3ss_temp = pd.merge(df_rmats_sil_3ss_temp, df_sil_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_sil_3ss_temp['index']
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp.set_index(14)
+    df_rmats_sil_3ss_temp = df_rmats_sil_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss.reset_index()
+    rmats_sil_5ss = pbt.BedTool.from_dataframe(df_rmats_sil_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_sil_5ss = rmats_sil_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_sil_5ss = rmats_sil_5ss.to_dataframe(header=None)
+    df_sil_5ss = df_sil_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_sil_5ss_grouped10 = df_sil_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_sil_5ss_grouped_12 = df_sil_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_sil_5ss = df_sil_5ss_grouped10.join(df_sil_5ss_grouped_12).reset_index()
+    df_sil_5ss = df_sil_5ss.set_index(3)
+    df_rmats_sil_5ss_temp = pd.merge(df_rmats_sil_5ss_temp, df_sil_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_sil_5ss_temp['index']
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss_temp.set_index(14)
+    df_rmats_sil_5ss_temp = df_rmats_sil_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_sil = df_rmats_sil_5ss_temp.join(df_rmats_sil_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+    
+    df_rmats_sil2 = df_rmats_sil[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+       'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_sil2 = df_rmats_sil2.reset_index()
+
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '+') & (2*window > (df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss'])) & \
+                      ((df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss']) > window),
+                      'start'] = df_rmats_sil2['start5ss'] - window
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '+') & (2*window > (df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss'])) & \
+                      ((df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss']) > window),
+                      'end'] = df_rmats_sil2['start3ss'] + window
+
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '-') & (2*window > (df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss'])) & \
+                      ((df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss']) > window),
+                      'start'] = df_rmats_sil2['start3ss'] - window
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '-') & (2*window > (df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss'])) & \
+                      ((df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss']) > window),
+                      'end'] = df_rmats_sil2['start5ss'] + window
+
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '+') & ((df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss']) < window),
+                      'start'] = df_rmats_sil2['start3ss']
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '+') & ((df_rmats_sil2['start5ss'] - df_rmats_sil2['start3ss']) < window),
+                      'end'] = df_rmats_sil2['start5ss']
+
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '-') & ((df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss']) < window),
+                      'start'] = df_rmats_sil2['start5ss']
+    df_rmats_sil2.loc[(df_rmats_sil2['strand5ss'] == '-') & ((df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss']) < window),
+                      'end'] = df_rmats_sil2['start3ss']
+
+    df_rmats_sil2['len'] = df_rmats_sil2['end'] - df_rmats_sil2['start']
+
+    df_rmats_sil2['diff'] = abs(df_rmats_sil2['start3ss'] - df_rmats_sil2['start5ss'])
+
+    df_rmats_sil2 = df_rmats_sil2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_sil2 = df_rmats_sil2[~(df_rmats_sil2['start'].isna() | df_rmats_sil2['end'].isna())]
+
+    df_rmats_sil2['start'] = df_rmats_sil2['start'].astype(int)
+    df_rmats_sil2['end'] = df_rmats_sil2['end'].astype(int)
+
+    rmats_sil2 = pbt.BedTool.from_dataframe(df_rmats_sil2)
+    rmats_sil2 = rmats_sil2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_sil2 = rmats_sil2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_sil2['base_coverage_5ss']
+    del df_rmats_sil2['chrom2']
+    del df_rmats_sil2['start2']
+    del df_rmats_sil2['end2']
+    del df_rmats_sil2['useless']
+    del df_rmats_sil2['strand2']
+
+    df_rmats_sil2_grouped10 = df_rmats_sil2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_sil2_grouped12 = df_rmats_sil2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_sil2 = df_rmats_sil2_grouped10.join(df_rmats_sil2_grouped12).reset_index()
+    df_rmats_sil2 = df_rmats_sil2.set_index('index')
+
+    df_rmats_sil_overlap = df_rmats_sil.join(df_rmats_sil2)
+
+    df_rmats_sil_overlap = df_rmats_sil_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_sil_overlap.loc[df_rmats_sil_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_sil_overlap.loc[df_rmats_sil_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_sil_overlap.loc[df_rmats_sil_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_sil_overlap['cDNA_coverage_5ss'] = df_rmats_sil_overlap['cDNA_coverage_5ss'] - df_rmats_sil_overlap['overlap_score']
+    df_rmats_sil_overlap['cDNA_coverage_3ss'] = df_rmats_sil_overlap['cDNA_coverage_3ss'] - df_rmats_sil_overlap['overlap_score']
+    df_rmats_sil_overlap['base_coverage_5ss'] = df_rmats_sil_overlap['base_coverage_5ss'] - df_rmats_sil_overlap['overlap_base']
+    df_rmats_sil_overlap['base_coverage_3ss'] = df_rmats_sil_overlap['base_coverage_3ss'] - df_rmats_sil_overlap['overlap_base']
+
+    df_rmats_sil = df_rmats_sil_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss.reset_index()
+    rmats_enhrest_3ss = pbt.BedTool.from_dataframe(df_rmats_enhrest_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_enhrest_3ss = rmats_enhrest_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_enhrest_3ss = rmats_enhrest_3ss.to_dataframe(header=None)
+    df_enhrest_3ss = df_enhrest_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_enhrest_3ss_grouped10 = df_enhrest_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_enhrest_3ss_grouped_12 = df_enhrest_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_enhrest_3ss = df_enhrest_3ss_grouped10.join(df_enhrest_3ss_grouped_12).reset_index()
+    df_enhrest_3ss = df_enhrest_3ss.set_index(3)
+    df_rmats_enhrest_3ss_temp = pd.merge(df_rmats_enhrest_3ss_temp, df_enhrest_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enhrest_3ss_temp['index']
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss_temp.set_index(14)
+    df_rmats_enhrest_3ss_temp = df_rmats_enhrest_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss.reset_index()
+    rmats_enhrest_5ss = pbt.BedTool.from_dataframe(df_rmats_enhrest_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_enhrest_5ss = rmats_enhrest_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_enhrest_5ss = rmats_enhrest_5ss.to_dataframe(header=None)
+    df_enhrest_5ss = df_enhrest_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_enhrest_5ss_grouped10 = df_enhrest_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_enhrest_5ss_grouped_12 = df_enhrest_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_enhrest_5ss = df_enhrest_5ss_grouped10.join(df_enhrest_5ss_grouped_12).reset_index()
+    df_enhrest_5ss = df_enhrest_5ss.set_index(3)
+    df_rmats_enhrest_5ss_temp = pd.merge(df_rmats_enhrest_5ss_temp, df_enhrest_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_enhrest_5ss_temp['index']
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss_temp.set_index(14)
+    df_rmats_enhrest_5ss_temp = df_rmats_enhrest_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_enhrest = df_rmats_enhrest_5ss_temp.join(df_rmats_enhrest_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+
+    df_rmats_enhrest2 = df_rmats_enhrest[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+        'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_enhrest2 = df_rmats_enhrest2.reset_index()
+
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '+') & (2*window > (df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss'])) & \
+                    ((df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss']) > window),
+                    'start'] = df_rmats_enhrest2['start5ss'] - window
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '+') & (2*window > (df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss'])) & \
+                    ((df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss']) > window),
+                    'end'] = df_rmats_enhrest2['start3ss'] + window
+
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '-') & (2*window > (df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss'])) & \
+                    ((df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss']) > window),
+                    'start'] = df_rmats_enhrest2['start3ss'] - window
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '-') & (2*window > (df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss'])) & \
+                    ((df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss']) > window),
+                    'end'] = df_rmats_enhrest2['start5ss'] + window
+
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '+') & ((df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss']) < window),
+                    'start'] = df_rmats_enhrest2['start3ss']
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '+') & ((df_rmats_enhrest2['start5ss'] - df_rmats_enhrest2['start3ss']) < window),
+                    'end'] = df_rmats_enhrest2['start5ss']
+
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '-') & ((df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss']) < window),
+                    'start'] = df_rmats_enhrest2['start5ss']
+    df_rmats_enhrest2.loc[(df_rmats_enhrest2['strand5ss'] == '-') & ((df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss']) < window),
+                    'end'] = df_rmats_enhrest2['start3ss']
+
+    df_rmats_enhrest2['len'] = df_rmats_enhrest2['end'] - df_rmats_enhrest2['start']
+
+    df_rmats_enhrest2['diff'] = abs(df_rmats_enhrest2['start3ss'] - df_rmats_enhrest2['start5ss'])
+
+    df_rmats_enhrest2 = df_rmats_enhrest2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_enhrest2 = df_rmats_enhrest2[~(df_rmats_enhrest2['start'].isna() | df_rmats_enhrest2['end'].isna())]
+
+    df_rmats_enhrest2['start'] = df_rmats_enhrest2['start'].astype(int)
+    df_rmats_enhrest2['end'] = df_rmats_enhrest2['end'].astype(int)
+
+    rmats_enhrest2 = pbt.BedTool.from_dataframe(df_rmats_enhrest2)
+    rmats_enhrest2 = rmats_enhrest2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_enhrest2 = rmats_enhrest2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_enhrest2['base_coverage_5ss']
+    del df_rmats_enhrest2['chrom2']
+    del df_rmats_enhrest2['start2']
+    del df_rmats_enhrest2['end2']
+    del df_rmats_enhrest2['useless']
+    del df_rmats_enhrest2['strand2']
+
+    df_rmats_enhrest2_grouped10 = df_rmats_enhrest2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_enhrest2_grouped12 = df_rmats_enhrest2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_enhrest2 = df_rmats_enhrest2_grouped10.join(df_rmats_enhrest2_grouped12).reset_index()
+    df_rmats_enhrest2 = df_rmats_enhrest2.set_index('index')
+
+    df_rmats_enhrest_overlap = df_rmats_enhrest.join(df_rmats_enhrest2)
+
+    df_rmats_enhrest_overlap = df_rmats_enhrest_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_enhrest_overlap.loc[df_rmats_enhrest_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_enhrest_overlap.loc[df_rmats_enhrest_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_enhrest_overlap.loc[df_rmats_enhrest_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_enhrest_overlap['cDNA_coverage_5ss'] = df_rmats_enhrest_overlap['cDNA_coverage_5ss'] - df_rmats_enhrest_overlap['overlap_score']
+    df_rmats_enhrest_overlap['cDNA_coverage_3ss'] = df_rmats_enhrest_overlap['cDNA_coverage_3ss'] - df_rmats_enhrest_overlap['overlap_score']
+    df_rmats_enhrest_overlap['base_coverage_5ss'] = df_rmats_enhrest_overlap['base_coverage_5ss'] - df_rmats_enhrest_overlap['overlap_base']
+    df_rmats_enhrest_overlap['base_coverage_3ss'] = df_rmats_enhrest_overlap['base_coverage_3ss'] - df_rmats_enhrest_overlap['overlap_base']
+
+    df_rmats_enhrest = df_rmats_enhrest_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+    
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss.reset_index()
+    rmats_silrest_3ss = pbt.BedTool.from_dataframe(df_rmats_silrest_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_silrest_3ss = rmats_silrest_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_silrest_3ss = rmats_silrest_3ss.to_dataframe(header=None)
+    df_silrest_3ss = df_silrest_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_silrest_3ss_grouped10 = df_silrest_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_silrest_3ss_grouped_12 = df_silrest_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_silrest_3ss = df_silrest_3ss_grouped10.join(df_silrest_3ss_grouped_12).reset_index()
+    df_silrest_3ss = df_silrest_3ss.set_index(3)
+    df_rmats_silrest_3ss_temp = pd.merge(df_rmats_silrest_3ss_temp, df_silrest_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_silrest_3ss_temp['index']
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss_temp.set_index(14)
+    df_rmats_silrest_3ss_temp = df_rmats_silrest_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss.reset_index()
+    rmats_silrest_5ss = pbt.BedTool.from_dataframe(df_rmats_silrest_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_silrest_5ss = rmats_silrest_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_silrest_5ss = rmats_silrest_5ss.to_dataframe(header=None)
+    df_silrest_5ss = df_silrest_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_silrest_5ss_grouped10 = df_silrest_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_silrest_5ss_grouped_12 = df_silrest_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_silrest_5ss = df_silrest_5ss_grouped10.join(df_silrest_5ss_grouped_12).reset_index()
+    df_silrest_5ss = df_silrest_5ss.set_index(3)
+    df_rmats_silrest_5ss_temp = pd.merge(df_rmats_silrest_5ss_temp, df_silrest_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_silrest_5ss_temp['index']
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss_temp.set_index(14)
+    df_rmats_silrest_5ss_temp = df_rmats_silrest_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_silrest = df_rmats_silrest_5ss_temp.join(df_rmats_silrest_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+    
+    df_rmats_silrest2 = df_rmats_silrest[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+        'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_silrest2 = df_rmats_silrest2.reset_index()
+
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '+') & (2*window > (df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss'])) & \
+                    ((df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss']) > window),
+                    'start'] = df_rmats_silrest2['start5ss'] - window
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '+') & (2*window > (df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss'])) & \
+                    ((df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss']) > window),
+                    'end'] = df_rmats_silrest2['start3ss'] + window
+
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '-') & (2*window > (df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss'])) & \
+                    ((df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss']) > window),
+                    'start'] = df_rmats_silrest2['start3ss'] - window
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '-') & (2*window > (df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss'])) & \
+                    ((df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss']) > window),
+                    'end'] = df_rmats_silrest2['start5ss'] + window
+
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '+') & ((df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss']) < window),
+                    'start'] = df_rmats_silrest2['start3ss']
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '+') & ((df_rmats_silrest2['start5ss'] - df_rmats_silrest2['start3ss']) < window),
+                    'end'] = df_rmats_silrest2['start5ss']
+
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '-') & ((df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss']) < window),
+                    'start'] = df_rmats_silrest2['start5ss']
+    df_rmats_silrest2.loc[(df_rmats_silrest2['strand5ss'] == '-') & ((df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss']) < window),
+                    'end'] = df_rmats_silrest2['start3ss']
+
+    df_rmats_silrest2['len'] = df_rmats_silrest2['end'] - df_rmats_silrest2['start']
+
+    df_rmats_silrest2['diff'] = abs(df_rmats_silrest2['start3ss'] - df_rmats_silrest2['start5ss'])
+
+    df_rmats_silrest2 = df_rmats_silrest2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_silrest2 = df_rmats_silrest2[~(df_rmats_silrest2['start'].isna() | df_rmats_silrest2['end'].isna())]
+
+    df_rmats_silrest2['start'] = df_rmats_silrest2['start'].astype(int)
+    df_rmats_silrest2['end'] = df_rmats_silrest2['end'].astype(int)
+
+    rmats_silrest2 = pbt.BedTool.from_dataframe(df_rmats_silrest2)
+    rmats_silrest2 = rmats_silrest2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_silrest2 = rmats_silrest2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_silrest2['base_coverage_5ss']
+    del df_rmats_silrest2['chrom2']
+    del df_rmats_silrest2['start2']
+    del df_rmats_silrest2['end2']
+    del df_rmats_silrest2['useless']
+    del df_rmats_silrest2['strand2']
+
+    df_rmats_silrest2_grouped10 = df_rmats_silrest2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_silrest2_grouped12 = df_rmats_silrest2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_silrest2 = df_rmats_silrest2_grouped10.join(df_rmats_silrest2_grouped12).reset_index()
+    df_rmats_silrest2 = df_rmats_silrest2.set_index('index')
+
+    df_rmats_silrest_overlap = df_rmats_silrest.join(df_rmats_silrest2)
+
+    df_rmats_silrest_overlap = df_rmats_silrest_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_silrest_overlap.loc[df_rmats_silrest_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_silrest_overlap.loc[df_rmats_silrest_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_silrest_overlap.loc[df_rmats_silrest_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_silrest_overlap['cDNA_coverage_5ss'] = df_rmats_silrest_overlap['cDNA_coverage_5ss'] - df_rmats_silrest_overlap['overlap_score']
+    df_rmats_silrest_overlap['cDNA_coverage_3ss'] = df_rmats_silrest_overlap['cDNA_coverage_3ss'] - df_rmats_silrest_overlap['overlap_score']
+    df_rmats_silrest_overlap['base_coverage_5ss'] = df_rmats_silrest_overlap['base_coverage_5ss'] - df_rmats_silrest_overlap['overlap_base']
+    df_rmats_silrest_overlap['base_coverage_3ss'] = df_rmats_silrest_overlap['base_coverage_3ss'] - df_rmats_silrest_overlap['overlap_base']
+
+    df_rmats_silrest = df_rmats_silrest_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss.reset_index()
+    rmats_ctrl_3ss = pbt.BedTool.from_dataframe(df_rmats_ctrl_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_ctrl_3ss = rmats_ctrl_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_ctrl_3ss = rmats_ctrl_3ss.to_dataframe(header=None)
+    df_ctrl_3ss = df_ctrl_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_ctrl_3ss_grouped10 = df_ctrl_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_ctrl_3ss_grouped_12 = df_ctrl_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_ctrl_3ss = df_ctrl_3ss_grouped10.join(df_ctrl_3ss_grouped_12).reset_index()
+    df_ctrl_3ss = df_ctrl_3ss.set_index(3)
+    df_rmats_ctrl_3ss_temp = pd.merge(df_rmats_ctrl_3ss_temp, df_ctrl_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_ctrl_3ss_temp['index']
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss_temp.set_index(14)
+    df_rmats_ctrl_3ss_temp = df_rmats_ctrl_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss.reset_index()
+    rmats_ctrl_5ss = pbt.BedTool.from_dataframe(df_rmats_ctrl_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_ctrl_5ss = rmats_ctrl_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_ctrl_5ss = rmats_ctrl_5ss.to_dataframe(header=None)
+    df_ctrl_5ss = df_ctrl_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_ctrl_5ss_grouped10 = df_ctrl_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_ctrl_5ss_grouped_12 = df_ctrl_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_ctrl_5ss = df_ctrl_5ss_grouped10.join(df_ctrl_5ss_grouped_12).reset_index()
+    df_ctrl_5ss = df_ctrl_5ss.set_index(3)
+    df_rmats_ctrl_5ss_temp = pd.merge(df_rmats_ctrl_5ss_temp, df_ctrl_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_ctrl_5ss_temp['index']
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss_temp.set_index(14)
+    df_rmats_ctrl_5ss_temp = df_rmats_ctrl_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_ctrl = df_rmats_ctrl_5ss_temp.join(df_rmats_ctrl_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+    
+    df_rmats_ctrl2 = df_rmats_ctrl[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+        'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_ctrl2 = df_rmats_ctrl2.reset_index()
+
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '+') & (2*window > (df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss'])) & \
+                    ((df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss']) > window),
+                    'start'] = df_rmats_ctrl2['start5ss'] - window
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '+') & (2*window > (df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss'])) & \
+                    ((df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss']) > window),
+                    'end'] = df_rmats_ctrl2['start3ss'] + window
+
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '-') & (2*window > (df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss'])) & \
+                    ((df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss']) > window),
+                    'start'] = df_rmats_ctrl2['start3ss'] - window
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '-') & (2*window > (df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss'])) & \
+                    ((df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss']) > window),
+                    'end'] = df_rmats_ctrl2['start5ss'] + window
+
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '+') & ((df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss']) < window),
+                    'start'] = df_rmats_ctrl2['start3ss']
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '+') & ((df_rmats_ctrl2['start5ss'] - df_rmats_ctrl2['start3ss']) < window),
+                    'end'] = df_rmats_ctrl2['start5ss']
+
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '-') & ((df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss']) < window),
+                    'start'] = df_rmats_ctrl2['start5ss']
+    df_rmats_ctrl2.loc[(df_rmats_ctrl2['strand5ss'] == '-') & ((df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss']) < window),
+                    'end'] = df_rmats_ctrl2['start3ss']
+
+    df_rmats_ctrl2['len'] = df_rmats_ctrl2['end'] - df_rmats_ctrl2['start']
+
+    df_rmats_ctrl2['diff'] = abs(df_rmats_ctrl2['start3ss'] - df_rmats_ctrl2['start5ss'])
+
+    df_rmats_ctrl2 = df_rmats_ctrl2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_ctrl2 = df_rmats_ctrl2[~(df_rmats_ctrl2['start'].isna() | df_rmats_ctrl2['end'].isna())]
+
+    df_rmats_ctrl2['start'] = df_rmats_ctrl2['start'].astype(int)
+    df_rmats_ctrl2['end'] = df_rmats_ctrl2['end'].astype(int)
+
+    rmats_ctrl2 = pbt.BedTool.from_dataframe(df_rmats_ctrl2)
+    rmats_ctrl2 = rmats_ctrl2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_ctrl2 = rmats_ctrl2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_ctrl2['base_coverage_5ss']
+    del df_rmats_ctrl2['chrom2']
+    del df_rmats_ctrl2['start2']
+    del df_rmats_ctrl2['end2']
+    del df_rmats_ctrl2['useless']
+    del df_rmats_ctrl2['strand2']
+
+    df_rmats_ctrl2_grouped10 = df_rmats_ctrl2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_ctrl2_grouped12 = df_rmats_ctrl2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_ctrl2 = df_rmats_ctrl2_grouped10.join(df_rmats_ctrl2_grouped12).reset_index()
+    df_rmats_ctrl2 = df_rmats_ctrl2.set_index('index')
+
+    df_rmats_ctrl_overlap = df_rmats_ctrl.join(df_rmats_ctrl2)
+
+    df_rmats_ctrl_overlap = df_rmats_ctrl_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_ctrl_overlap.loc[df_rmats_ctrl_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_ctrl_overlap.loc[df_rmats_ctrl_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_ctrl_overlap.loc[df_rmats_ctrl_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_ctrl_overlap['cDNA_coverage_5ss'] = df_rmats_ctrl_overlap['cDNA_coverage_5ss'] - df_rmats_ctrl_overlap['overlap_score']
+    df_rmats_ctrl_overlap['cDNA_coverage_3ss'] = df_rmats_ctrl_overlap['cDNA_coverage_3ss'] - df_rmats_ctrl_overlap['overlap_score']
+    df_rmats_ctrl_overlap['base_coverage_5ss'] = df_rmats_ctrl_overlap['base_coverage_5ss'] - df_rmats_ctrl_overlap['overlap_base']
+    df_rmats_ctrl_overlap['base_coverage_3ss'] = df_rmats_ctrl_overlap['base_coverage_3ss'] - df_rmats_ctrl_overlap['overlap_base']
+
+    df_rmats_ctrl = df_rmats_ctrl_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
+
+    df_rmats_const_3ss_temp = df_rmats_const_3ss.reset_index()
+    rmats_const_3ss = pbt.BedTool.from_dataframe(df_rmats_const_3ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_const_3ss = rmats_const_3ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_const_3ss = rmats_const_3ss.to_dataframe(header=None)
+    df_const_3ss = df_const_3ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_const_3ss_grouped10 = df_const_3ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_const_3ss_grouped_12 = df_const_3ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_const_3ss = df_const_3ss_grouped10.join(df_const_3ss_grouped_12).reset_index()
+    df_const_3ss = df_const_3ss.set_index(3)
+    df_rmats_const_3ss_temp = pd.merge(df_rmats_const_3ss_temp, df_const_3ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_const_3ss_temp['index']
+    df_rmats_const_3ss_temp = df_rmats_const_3ss_temp.set_index(14)
+    df_rmats_const_3ss_temp = df_rmats_const_3ss_temp.rename(columns={10: 'cDNA_coverage_3ss', 12: 'base_coverage_3ss'})
+
+    df_rmats_const_5ss_temp = df_rmats_const_5ss.reset_index()
+    rmats_const_5ss = pbt.BedTool.from_dataframe(df_rmats_const_5ss_temp[['chr', 'start', 'end', 'index', 14, 'strand']])
+    rmats_const_5ss = rmats_const_5ss.slop(l=window, r=window, g=fai, s=True).intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+    df_const_5ss = rmats_const_5ss.to_dataframe(header=None)
+    df_const_5ss = df_const_5ss[[0, 1, 2, 3, 4, 10, 12]]
+    df_const_5ss_grouped10 = df_const_5ss.groupby(by=[0, 1, 2, 3, 4])[10].sum().to_frame()
+    df_const_5ss_grouped_12 = df_const_5ss.groupby(by=[0, 1, 2, 3, 4])[12].sum().to_frame()
+    df_const_5ss = df_const_5ss_grouped10.join(df_const_5ss_grouped_12).reset_index()
+    df_const_5ss = df_const_5ss.set_index(3)
+    df_rmats_const_5ss_temp = pd.merge(df_rmats_const_5ss_temp, df_const_5ss[[10, 12]], left_on='index', right_index=True)
+    del df_rmats_const_5ss_temp['index']
+    df_rmats_const_5ss_temp = df_rmats_const_5ss_temp.set_index(14)
+    df_rmats_const_5ss_temp = df_rmats_const_5ss_temp.rename(columns={10: 'cDNA_coverage_5ss', 12: 'base_coverage_5ss'})
+
+    df_rmats_const = df_rmats_const_5ss_temp.join(df_rmats_const_3ss_temp, lsuffix='5ss', rsuffix='3ss')
+    
+    df_rmats_const2 = df_rmats_const[['chr5ss', 'start5ss', 'end5ss', 'strand5ss', 'cDNA_coverage_5ss', 'base_coverage_5ss',
+        'chr3ss', 'start3ss', 'end3ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+
+    df_rmats_const2 = df_rmats_const2.reset_index()
+
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '+') & (2*window > (df_rmats_const2['start5ss'] - df_rmats_const2['start3ss'])) & \
+                    ((df_rmats_const2['start5ss'] - df_rmats_const2['start3ss']) > window),
+                    'start'] = df_rmats_const2['start5ss'] - window
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '+') & (2*window > (df_rmats_const2['start5ss'] - df_rmats_const2['start3ss'])) & \
+                    ((df_rmats_const2['start5ss'] - df_rmats_const2['start3ss']) > window),
+                    'end'] = df_rmats_const2['start3ss'] + window
+
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '-') & (2*window > (df_rmats_const2['start3ss'] - df_rmats_const2['start5ss'])) & \
+                    ((df_rmats_const2['start3ss'] - df_rmats_const2['start5ss']) > window),
+                    'start'] = df_rmats_const2['start3ss'] - window
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '-') & (2*window > (df_rmats_const2['start3ss'] - df_rmats_const2['start5ss'])) & \
+                    ((df_rmats_const2['start3ss'] - df_rmats_const2['start5ss']) > window),
+                    'end'] = df_rmats_const2['start5ss'] + window
+
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '+') & ((df_rmats_const2['start5ss'] - df_rmats_const2['start3ss']) < window),
+                    'start'] = df_rmats_const2['start3ss']
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '+') & ((df_rmats_const2['start5ss'] - df_rmats_const2['start3ss']) < window),
+                    'end'] = df_rmats_const2['start5ss']
+
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '-') & ((df_rmats_const2['start3ss'] - df_rmats_const2['start5ss']) < window),
+                    'start'] = df_rmats_const2['start5ss']
+    df_rmats_const2.loc[(df_rmats_const2['strand5ss'] == '-') & ((df_rmats_const2['start3ss'] - df_rmats_const2['start5ss']) < window),
+                    'end'] = df_rmats_const2['start3ss']
+
+    df_rmats_const2['len'] = df_rmats_const2['end'] - df_rmats_const2['start']
+
+    df_rmats_const2['diff'] = abs(df_rmats_const2['start3ss'] - df_rmats_const2['start5ss'])
+
+    df_rmats_const2 = df_rmats_const2[['chr5ss', 'start', 'end', 14, 'base_coverage_5ss', 'strand5ss']]
+
+    df_rmats_const2 = df_rmats_const2[~(df_rmats_const2['start'].isna() | df_rmats_const2['end'].isna())]
+
+    df_rmats_const2['start'] = df_rmats_const2['start'].astype(int)
+    df_rmats_const2['end'] = df_rmats_const2['end'].astype(int)
+
+    rmats_const2 = pbt.BedTool.from_dataframe(df_rmats_const2)
+    rmats_const2 = rmats_const2.intersect(pbt.BedTool(xl_bed), s=True, wao=True)
+
+    df_rmats_const2 = rmats_const2.to_dataframe(names=['chrom', 'start', 'end', 'index', 'base_coverage_5ss', 'strand', 'chrom2', 'start2', 'end2', 'useless', 'overlap_score', 'strand2', 'overlap_base'])
+
+    del df_rmats_const2['base_coverage_5ss']
+    del df_rmats_const2['chrom2']
+    del df_rmats_const2['start2']
+    del df_rmats_const2['end2']
+    del df_rmats_const2['useless']
+    del df_rmats_const2['strand2']
+
+    df_rmats_const2_grouped10 = df_rmats_const2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_score'].sum().to_frame()
+    df_rmats_const2_grouped12 = df_rmats_const2.groupby(by=['chrom', 'start', 'end', 'index', 'strand'])['overlap_base'].sum().to_frame()
+    df_rmats_const2 = df_rmats_const2_grouped10.join(df_rmats_const2_grouped12).reset_index()
+    df_rmats_const2 = df_rmats_const2.set_index('index')
+
+    df_rmats_const_overlap = df_rmats_const.join(df_rmats_const2)
+
+    df_rmats_const_overlap = df_rmats_const_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'overlap_score', 'overlap_base']].fillna(0)
+
+    df_rmats_const_overlap.loc[df_rmats_const_overlap['overlap_score'] == -1, 'overlap_score'] = 0
+    df_rmats_const_overlap.loc[df_rmats_const_overlap['cDNA_coverage_5ss'] == -1, 'cDNA_coverage_5ss'] = 0
+    df_rmats_const_overlap.loc[df_rmats_const_overlap['cDNA_coverage_3ss'] == -1, 'cDNA_coverage_3ss'] = 0
+
+    df_rmats_const_overlap['cDNA_coverage_5ss'] = df_rmats_const_overlap['cDNA_coverage_5ss'] - df_rmats_const_overlap['overlap_score']
+    df_rmats_const_overlap['cDNA_coverage_3ss'] = df_rmats_const_overlap['cDNA_coverage_3ss'] - df_rmats_const_overlap['overlap_score']
+    df_rmats_const_overlap['base_coverage_5ss'] = df_rmats_const_overlap['base_coverage_5ss'] - df_rmats_const_overlap['overlap_base']
+    df_rmats_const_overlap['base_coverage_3ss'] = df_rmats_const_overlap['base_coverage_3ss'] - df_rmats_const_overlap['overlap_base']
+
+    df_rmats_const = df_rmats_const_overlap[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss']]
+    
 
     df_rmats_enh['class'] = 'enh'
     df_rmats_sil['class'] = 'sil'
@@ -854,9 +2202,14 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     df_rmats_const['class'] = 'const'
 
     df_temp = pd.concat([df_rmats_enh, df_rmats_sil, df_rmats_enhrest, df_rmats_silrest, df_rmats_ctrl, df_rmats_const])
-    df_out = df_rmats.merge(df_temp[['num_xl_3ss', 'num_xl_5ss', 'class']], how='left', left_index = True, right_index=True)
+    df_temp = df_temp[['cDNA_coverage_5ss', 'base_coverage_5ss', 'cDNA_coverage_3ss', 'base_coverage_3ss', 'class']]
+
+    df_temp.to_csv(f'{output_dir}/{name}_temp_labeled.tsv', sep='\t', index=None)
+
+    df_out = df_rmats.merge(df_temp, how='left', left_index = True, right_index=True)
+
     df_out.to_csv(f'{output_dir}/{name}_labeled.tsv', sep='\t', index=None)
-    
+
     
     if de_source == 'rmats':
         df_final_3ss_upstream = df_enh_3ss_upstream.rolling(smoothing, center=True, win_type="gaussian").mean(std=2).merge(
@@ -871,6 +2224,11 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
         df_final_5ss_downstream = df_enh_5ss_downstream.rolling(smoothing, center=True, win_type="gaussian").mean(std=2).merge(
             df_sil_5ss_downstream.rolling(smoothing, center=True, win_type="gaussian").mean(std=2), left_index=True, right_index=True).merge(
             df_ctrl_5ss_downstream.rolling(smoothing, center=True, win_type="gaussian").mean(std=2), left_index=True, right_index=True)
+        df_final_3ss_upstream.to_csv(f'{output_dir}/{name}_final_3ss_upstream.tsv', sep='\t', index=None)
+        df_final_5ss_upstream.to_csv(f'{output_dir}/{name}_final_5ss_upstream.tsv', sep='\t', index=None)
+        df_final_3ss_downstream.to_csv(f'{output_dir}/{name}_final_3ss_downstream.tsv', sep='\t', index=None)
+        df_final_5ss_downstream.to_csv(f'{output_dir}/{name}_final_5ss_downstream.tsv', sep='\t', index=None)
+        
     
     # if z_test:
     #     df_radnom_ctrl_3ss = get_random_coverage(df_coverage_3ss, window, n_exons, n_samples).rename(
@@ -984,31 +2342,41 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     
     if de_source == 'rmats':
         sns.set(rc={'figure.figsize':(20, 6)})
+        sns.set_style("whitegrid")
         fig2, axs = plt.subplots(1, 2, sharey='row')
-        colors = [colors_dict['enh'], colors_dict['sil'], colors_dict['ctrl']]
-        sns.lineplot(data=df_final_3ss_upstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors, ax=axs[0], legend=False)
-        sns.lineplot(data=df_final_5ss_upstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors, ax=axs[1], legend=False)
+        colors_fig2 = [colors_dict['enh'], colors_dict['sil'], colors_dict['ctrl']]
+        new_labels2 = [f'enhanced {str(len(df_rmats_enh_3ss))} exons', f'silenced {str(len(df_rmats_sil_3ss))} exons',
+                  f'control {str(len(df_rmats_ctrl_3ss))} exons']
+        sns.lineplot(data=df_final_3ss_upstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors_fig2, ax=axs[0], 
+            linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0)])
+        sns.lineplot(data=df_final_5ss_upstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors_fig2, ax=axs[1], 
+            linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0)])
         axs[0].set_title("Coverage around 3'SS of upstream exon")
         axs[1].set_title("Coverage around 5'SS of upstream exon")
         axs[0].set_ylabel('Normalised coverage of crosslinks or peaks')
         axs[0].set_xlabel("Position relative to 3'SS")
         axs[1].set_xlabel("Position relative to 5'SS")
-        fig2.legend(new_labels)
+        axs[0].legend(new_labels2)
+        axs[1].legend(new_labels2)
         plt.tight_layout()
-        plt.show()
+        fig2.savefig(f'{output_dir}/{name}_upstream.pdf')
 
         sns.set(rc={'figure.figsize':(20, 6)})
+        sns.set_style("whitegrid")
         fig3, axs = plt.subplots(1, 2, sharey='row')
-        sns.lineplot(data=df_final_3ss_downstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors, ax=axs[0], legend=False)
-        sns.lineplot(data=df_final_5ss_downstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors, ax=axs[1], legend=False)
+        sns.lineplot(data=df_final_3ss_downstream.loc[list(range(int(-window), int(window * 0.2))), :], palette=colors_fig2, ax=axs[0], 
+            linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0)])
+        sns.lineplot(data=df_final_5ss_downstream.loc[list(range(int(-window * 0.2), int(window))), :], palette=colors_fig2, ax=axs[1], 
+            linewidth=linewidth, dashes=[(1, 0), (1, 0), (1, 0)])
         axs[0].set_title("Coverage around 3'SS of downstream exon")
         axs[1].set_title("Coverage around 5'SS of downstream exon")
         axs[0].set_ylabel('Normalised coverage of crosslinks or peaks')
         axs[0].set_xlabel("Position relative to 3'SS")
         axs[1].set_xlabel("Position relative to 5'SS")
-        fig3.legend(new_labels)
+        axs[0].legend(new_labels2)
+        axs[1].legend(new_labels2)
         plt.tight_layout()
-        plt.show()   
+        fig3.savefig(f'{output_dir}/{name}_downstream.pdf')
     
     max_b = max(max(enh_3ss_no_xl.values()), max(sil_3ss_no_xl.values()), max(ctrl_3ss_no_xl.values()),
                max(enhrest_3ss_no_xl.values()), max(silrest_3ss_no_xl.values()), max(const_3ss_no_xl.values()))
@@ -1097,6 +2465,7 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
     plt.tight_layout()
     plt.savefig(f'{output_dir}/{name}_exon_classes.pdf')
     pbt.helpers.cleanup()
+
  
 if __name__=='__main__':
     import sys
@@ -1111,9 +2480,9 @@ if __name__=='__main__':
     max_ctrl = float(sys.argv[8])#0.05
     max_inclusion= float(sys.argv[9])#0.9
     max_fdr = float(sys.argv[10])#0.1
-    max_ench = float(sys.argv[11])#-0.05
+    max_enh = float(sys.argv[11])#-0.05
     min_sil = float(sys.argv[12])#0.05
     min_prob_whippet = float(sys.argv[13])#0.9
-
-    run_rna_map(de_file, xl_bed, fai, output_folder, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_ench, min_sil, min_prob_whippet)
+    
+    run_rna_map(de_file, xl_bed, fai, window, smoothing, 
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, min_prob_whippet, output_folder)
