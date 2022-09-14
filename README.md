@@ -127,3 +127,12 @@ dPSI   (            As in silenced or enhanced             )
 maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9xxxxxx> 1 )
 FDR    (  0 -----0.1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx> 1 )
 ```
+
+**Heirarchy**
+
+When it comes to alternative exons, an exon may be involved in multiple events, but we want to avoid plotting it many times, so we implement a heirarchy:
+
+1. If an exon meets criteria for silenced or enhanced this is designated, if criteria for both is met the most extreme dPSI value is preferred.
+2. Of remaining exons, if they meet criteria for enhanced/silenced rest this is designated, if criteria for both is met the most extreme dPSI value is preferred.
+3. Of remaining exons, if they meet critera for constituitive, this is designated.
+4. Of remaining exons, if they meet critera for control, this is designated.
