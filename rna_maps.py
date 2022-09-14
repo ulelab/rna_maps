@@ -39,7 +39,7 @@ def cli():
                         help='maximum dPSI for control events [DEFAULT 0.05]')
     optional.add_argument('-xi',"--maxincl", type=float, default=0.9, nargs='?',
                         help='maximum PSI for control exons, above this limit exons are considered constitutive [DEFAULT 0.9]')
-    optional.add_argument('-xf',"--maxfdr", type=float, default=-0.1, nargs='?',
+    optional.add_argument('-xf',"--maxfdr", type=float, default=0.1, nargs='?',
                         help='maximum FDR for regulated events, above this events fall in "rest" class, is used for rMATS [DEFAULT 0.1]')
     optional.add_argument('-xe',"--maxenh", type=float, default=-0.05, nargs='?',
                         help='maximum inclusion for exons to be considered enhanced [DEFAULT -0.05]')
@@ -88,43 +88,6 @@ def get_exon_dist(len_df_in, df_coverage, window):
     return no_xl_per_exon
 
 
-# def get_random_coverage(df, window, n_exons = 150, n_samples = 300):
-#     event_starts = list(df[df.position == 1].index)
-#     event_len = 2 * window + 1
-#     positions = range(event_len)
-#     print(f'{n_samples} coverages for  randomly sampled {n_exons} exons')
-#     random_coverages = pd.DataFrame(index= range(2 * window + 1))
-#     times = []
-#     counter = 0
-#     for i in range(n_samples):
-#         random_coverages_temp = pd.DataFrame(index= range(2 * window + 1))
-#         start_time = time.time()
-#         random_events = random.choices(event_starts, k=n_exons)
-#         indices = [[i + j for j in positions] for i in random_events]
-#         for j, index in enumerate(indices):
-#             df_coverage = df.loc[index, :].rename(columns={'coverage': f'coverage{i}_{j}'})
-#             if df_coverage[f'coverage{i}_{j}'].sum() == 0:
-#                 continue
-#             else:
-#                 counter += 1
-#                 df_plot = df_coverage.copy()
-#                 df_plot.loc[df_plot.strand=='+', 'map'] = df_plot['position']
-#                 df_plot.loc[df_plot.strand=='-', 'map'] = abs(2 * window + 2  - df_plot['position'])
-#                 df_plot.map = df_plot.map.astype('int32')
-#                 df_plot = df_plot[[f'coverage{i}_{j}', 'map']]
-#                 df_plot = df_plot.set_index('map')
-#                 random_coverages_temp = random_coverages_temp.join(df_plot)
-#         random_coverages_temp = random_coverages_temp.sum(axis=1) / n_exons
-#         random_coverages = random_coverages.join(pd.DataFrame(random_coverages_temp).rename(columns= {0: f'coverage_{i}'}))
-#         end_time = time.time()
-#         times.append(end_time - start_time)
-#     random_coverages['mean'] = random_coverages.mean(axis=1)
-#     random_coverages['std'] = random_coverages.std(axis=1)
-#     random_coverages['new_index'] = random_coverages.index + 1
-#     random_coverages.set_index('new_index', inplace=True)
-#     return random_coverages[['mean', 'std']]
-
-
 def get_3ss5ss_exons(df_exons):
     exons_stranded = df_exons.copy()
     exons_stranded.loc[df_exons[5] == '-', 1] = df_exons[2] # replace start with end
@@ -160,8 +123,8 @@ def get_3ss5ss_exons_whippet(df_exons):
         ['chrom', 'start', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']]
 
 
-def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15, 
-        min_ctrl=-0.05, max_ctrl=0.05, max_inclusion=0.99, max_fdr=0.1, max_enh=-0.05, min_sil=0.05, min_prob_whippet=0.9, output_dir='.',
+def run_rna_map(de_file, xl_bed, fai, window, smoothing, 
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir,
        #n_exons = 150, n_samples = 300, z_test=False
        ):
     name = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
@@ -352,30 +315,6 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
         index_selected = df_rmats_ctrl_3ss.index.union(df_rmats_enh_3ss.index.union(
             df_rmats_sil_3ss.index.union(df_rmats_enhrest_3ss.index.union(df_rmats_silrest_3ss.index.union(df_rmats_const_3ss.index)))))
 
-    elif de_source == 'whippet':
-        rmats_3ss, rmats_5ss = get_3ss5ss_exons_whippet(df_rmats)
-        print(f'There are: {len(rmats_3ss)} 3ss and {len(rmats_5ss)} 5ss')
-        df_rmats_ctrl_3ss = rmats_3ss[(rmats_3ss['DeltaPsi'] > min_ctrl) & (rmats_3ss['DeltaPsi'] < max_ctrl) &
-                                      (rmats_3ss['inclusion'] < max_inclusion) & (rmats_3ss['Probability'] > max_fdr)]
-        df_rmats_ctrl_5ss = rmats_5ss[(rmats_5ss['DeltaPsi'] > min_ctrl) & (rmats_5ss['DeltaPsi'] < max_ctrl) &
-                                      (rmats_5ss['inclusion'] < max_inclusion) & (rmats_5ss['Probability'] > max_fdr)]
-        df_rmats_const_3ss = rmats_3ss[(rmats_3ss['DeltaPsi'] > min_ctrl) & (rmats_3ss['DeltaPsi'] < max_ctrl) &
-                                      (rmats_3ss['inclusion'] > max_inclusion) & (rmats_3ss['Probability'] > max_fdr)]
-        df_rmats_const_5ss = rmats_5ss[(rmats_5ss['DeltaPsi'] > min_ctrl) & (rmats_5ss['DeltaPsi'] < max_ctrl) &
-                                      (rmats_5ss['inclusion'] > max_inclusion) & (rmats_5ss['Probability'] > max_fdr)]
-        del df_rmats_ctrl_3ss['inclusion']; del df_rmats_ctrl_5ss['inclusion']; del rmats_3ss['inclusion']; del rmats_5ss['inclusion']
-        df_rmats_enh_3ss = rmats_3ss[(rmats_3ss['DeltaPsi'] < max_enh) & (rmats_3ss['Probability'] > min_prob_whippet)]
-        df_rmats_enh_5ss = rmats_5ss[(rmats_5ss['DeltaPsi'] < max_enh) & (rmats_5ss['Probability'] > min_prob_whippet)] 
-        df_rmats_sil_3ss = rmats_3ss[(rmats_3ss['DeltaPsi'] > min_sil) & (rmats_3ss['Probability'] > min_prob_whippet)]
-        df_rmats_sil_5ss = rmats_5ss[(rmats_5ss['DeltaPsi'] > min_sil) & (rmats_3ss['Probability'] > min_prob_whippet)]
-        df_rmats_enhrest_3ss = rmats_3ss[(rmats_3ss['DeltaPsi'] < max_enh) & (rmats_3ss['Probability'] <= min_prob_whippet)]
-        df_rmats_enhrest_5ss = rmats_5ss[(rmats_5ss['DeltaPsi'] < max_enh) & (rmats_5ss['Probability'] <= min_prob_whippet)] 
-        df_rmats_silrest_3ss = rmats_3ss[(rmats_3ss['DeltaPsi'] > min_sil) & (rmats_3ss['Probability'] <= min_prob_whippet)]
-        df_rmats_silrest_5ss = rmats_5ss[(rmats_5ss['DeltaPsi'] > min_sil) & (rmats_3ss['Probability'] <= min_prob_whippet)]
-
-
-        index_selected = df_rmats_ctrl_3ss.index.union(df_rmats_enh_3ss.index.union(
-            df_rmats_sil_3ss.index.union(df_rmats_enhrest_3ss.index.union(df_rmats_silrest_3ss.index.union(df_rmats_const_3ss.index)))))
                 
     if len(df_rmats_ctrl_3ss) == 0:
         print('No control exons, try changing filtering parameters or file')
