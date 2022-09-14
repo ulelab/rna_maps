@@ -17,6 +17,26 @@ scipy=1.3.1
 This code accepts rMATs junction only quantified files, or Whippet.
 Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
 
+**Test your installation**
+
+To run a small test you can execute the following command:
+```
+python3 rna_maps.py \
+test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
+test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
+test/GRCh38.release34.primary_assembly.genome.fa.fai \
+. \
+1000 \
+15 \
+-0.05 \
+0.05 \
+0.9 \
+0.1 \
+-0.05 \
+0.05 \
+0.9
+```
+
 **Usage**:  
 ```
     python3 <path_to_script> <de_file_path> <sites_file_path> <genome_fai_path> <output_folder> <window> <smoothing> <min_ctrl> <max_ctrl> <max_inclusion> <max_fdr> <max_enc> <min_sil> <min_prob_whippet>
