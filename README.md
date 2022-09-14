@@ -15,19 +15,9 @@ Then run the test dataset to check the code is working:
 ```
 python3 \
 rna_maps.py \
-test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
-test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
-test/GRCh38.release34.primary_assembly.genome.fa.fai \
-. \
-1000 \
-15 \
--0.05 \
-0.05 \
-0.9 \
-0.1 \
--0.05 \
-0.05 \
-0.9
+-i test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
+-x test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
+-f test/GRCh38.release34.primary_assembly.genome.fa.fai
 ```
 *Preparing RNA-Seq data*:
 
@@ -48,18 +38,48 @@ scipy=1.3.1
 
 **Usage**:  
 ```
-    python3 <path_to_script> <de_file_path> <sites_file_path> <genome_fai_path> <output_folder> <window> <smoothing> <min_ctrl> <max_ctrl> <max_inclusion> <max_fdr> <max_enc> <min_sil> <min_prob_whippet>
+python3 rna_maps.py -h                                                                                                                                                      
+usage: rna_maps.py [-h] -i INPUTSPLICE -x INPUTXLSITES -f FASTAINDEX
+                   [-o [OUTPUTPATH]] [-w [WINDOW]] [-s [SMOOTHING]]
+                   [-mc [MINCTRL]] [-xc [MAXCTRL]] [-xi [MAXINCL]]
+                   [-xf [MAXFDR]] [-xe [MAXENH]] [-ms [MINSIL]]
+
+Plot CLIP crosslinks around regulated exons to study position-dependent impact
+on pre-mRNA splicing.
+
+required arguments:
+  -i INPUTSPLICE, --inputsplice INPUTSPLICE
+                        quantification of differential splicing produced by
+                        rMATS
+  -x INPUTXLSITES, --inputxlsites INPUTXLSITES
+                        CLIP crosslinks in BED file format
+  -f FASTAINDEX, --fastaindex FASTAINDEX
+                        genome fasta index file (.fai)
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -o [OUTPUTPATH], --outputpath [OUTPUTPATH]
+                        output folder [DEFAULT current directory]
+  -w [WINDOW], --window [WINDOW]
+                        window around regulated splicing events to plot
+                        crosslinks [DEFAULT 300]
+  -s [SMOOTHING], --smoothing [SMOOTHING]
+                        smoothing window for plotting crosslink signal
+                        [DEFAULT 15]
+  -mc [MINCTRL], --minctrl [MINCTRL]
+                        minimum dPSI for control events [DEFAULT -0.05]
+  -xc [MAXCTRL], --maxctrl [MAXCTRL]
+                        maximum dPSI for control events [DEFAULT 0.05]
+  -xi [MAXINCL], --maxincl [MAXINCL]
+                        maximum PSI for control exons, above this limit exons
+                        are considered constitutive [DEFAULT 0.9]
+  -xf [MAXFDR], --maxfdr [MAXFDR]
+                        maximum FDR for regulated events, above this events
+                        fall in "rest" class, is used for rMATS [DEFAULT 0.1]
+  -xe [MAXENH], --maxenh [MAXENH]
+                        maximum inclusion for exons to be considered enhanced
+                        [DEFAULT -0.05]
+  -ms [MINSIL], --minsil [MINSIL]
+                        minimum inclusion for exons to be considered silenced
+                        [DEFAULT 0.05] 
 ```
-`de_file`:*file with differential splicing table, rMATS and whippet are supported;*  
-`xl_bed`:*BED file with genomic coordinates of landmarks that are used for mapping around exons;*  
-`fai`:*FASTA index file;*  
-`output_folder`:*folder where the results will be saved, make sure it exists and is writable;*  
-`window`:*flanks around exons splice sites where coverages are mapped(recommended 300);*  
-`smoothing`:*size of smoothing window(recommended 15);*   
-`min_ctrl`:*minimal inclusion change for control exons(recommended -0.05);*  
-`max_ctrl`:*maximal inclusion change for control exons(recommended 0.05);*  
-`max_inclusion`:*maximal inclusion for control exons, above this limit exons are considered constitutive(recommended 0.9 to 0.99);*  
-`max_fdr`:*maximal FDR for regulated exons, above exons fall in rest class, is used for rMATS(recommended 0.1);*  
-`max_enc`:*maximum inclusion for exons to be considered enhanced (recommended -0.05);*  
-`min_sil`:*minimum inclusion for exons to be considered silenced (recommended 0.05);*  
-`min_prob_whippet`:*minimum probability for exons to considered regulated, below exons are labeled as rest, is used for whippet (recommended 0.9);*  
