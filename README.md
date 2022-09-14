@@ -83,3 +83,47 @@ optional arguments:
                         minimum inclusion for exons to be considered silenced
                         [DEFAULT 0.05] 
 ```
+
+### Definitions
+
+**Event types**
+
+Control: An event that doesn't change in inclusion (PSI) in this RBP knockdown, but might in another circumstance. Typical definition:
+
+```
+dPSI   ( -1 <---------- - 0.05xxxxx0xxxxx0.05----------> 1 )
+maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9------> 1 )
+FDR    (  0 xxxxx0.1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx> 1 )
+```
+
+Constituitive: An event that doesn't change in inclusion (PSI) in this RBP knockdown, but is unlikely to change in another circumstance. Typically defined as a control event *plus* have a maximum inclusion (PSI) of > 0.9-0.99.
+
+```
+dPSI   ( -1 <---------- - 0.05xxxxx0xxxxx0.05----------> 1 )
+maxPSI (  0 ----------------------------------0.9xxxxxx> 1 )
+FDR    (  0 xxxxx0.1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx> 1 )
+```
+
+Enhanced: An event that is *less* included in RBP knockdown, suggesting the RBP *promotes/enhances* inclusion of the event.
+
+```
+dPSI   ( -1 <xxxxxxxxxxx- 0.05-----0-----0.05----------> 1 )
+maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9xxxxxx> 1 )
+FDR    (  0 xxxxx0.1-----------------------------------> 1 )
+```
+
+Silenced: An event that is *more* included in RBP knockdown, suggesting the RBP *represses/silences* inclusion of the event.
+
+```
+dPSI   ( -1 <---------- - 0.05-----0-----0.05xxxxxxxxxx> 1 )
+maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9xxxxxx> 1 )
+FDR    (  0 xxxxx0.1-----------------------------------> 1 )
+```
+
+Enhanced/Silenced rest: A silenced or enhanced event where the FDR does not fall below the threshold.
+
+```
+dPSI   (            As in silenced or enhanced             )
+maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9xxxxxx> 1 )
+FDR    (  0 -----0.1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx> 1 )
+```
