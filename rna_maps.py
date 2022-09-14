@@ -8,12 +8,61 @@ import pybedtools as pbt
 import seaborn as sns
 import matplotlib.pyplot as plt
 import scipy.stats as stats
+import sys
+import os
+import argparse
 
 sns.set_style("whitegrid")
 colors_dict = {'all': '#D3D3D3', 'ctrl': '#408F76', 'enh': '#F30C08', 'sil': '#005299', 'enhrest': '#FFB122', 'silrest': '#6DC2F5', 'const': '#666666'}
 linewidth = 3
 dashes = False
 
+def cli():
+    parser = argparse.ArgumentParser(description='Plot CLIP crosslinks around regulated exons to study position-dependent impact on pre-mRNA splicing.')
+    optional = parser._action_groups.pop()
+    required = parser.add_argument_group('required arguments')
+    required.add_argument('-i',"--inputsplice", type=str, required=True,
+                        help='quantification of differential splicing produced by rMATS')
+    required.add_argument('-x',"--inputxlsites", type=str, required=True,
+                        help='CLIP crosslinks in BED file format')
+    required.add_argument('-f',"--fastaindex", type=str, required=True,
+                        help='genome fasta index file (.fai)')
+    optional.add_argument('-o',"--outputpath", type=str, default=os.getcwd(), nargs='?',
+                        help='output folder [DEFAULT current directory]')
+    optional.add_argument('-w',"--window", type=int, default=300, nargs='?',
+                        help='window around regulated splicing events to plot crosslinks [DEFAULT 300]')
+    optional.add_argument('-s',"--smoothing", type=int, default=15, nargs='?',
+                        help='smoothing window for plotting crosslink signal [DEFAULT 15]')
+    optional.add_argument('-mc',"--minctrl", type=float, default=-0.05, nargs='?',
+                        help='minimum dPSI for control events [DEFAULT -0.05]')
+    optional.add_argument('-xc',"--maxctrl", type=float, default=0.05, nargs='?',
+                        help='maximum dPSI for control events [DEFAULT 0.05]')
+    optional.add_argument('-xi',"--maxincl", type=float, default=0.9, nargs='?',
+                        help='maximum PSI for control exons, above this limit exons are considered constitutive [DEFAULT 0.9]')
+    optional.add_argument('-xf',"--maxfdr", type=float, default=-0.1, nargs='?',
+                        help='maximum FDR for regulated events, above this events fall in "rest" class, is used for rMATS [DEFAULT 0.1]')
+    optional.add_argument('-xe',"--maxenh", type=float, default=-0.05, nargs='?',
+                        help='maximum inclusion for exons to be considered enhanced [DEFAULT -0.05]')
+    optional.add_argument('-ms',"--minsil", type=float, default=0.05, nargs='?',
+                        help='minimum inclusion for exons to be considered silenced [DEFAULT 0.05]')
+    parser._action_groups.append(optional)
+    args = parser.parse_args()
+    print(args)
+
+    return(
+        args.inputsplice,
+        args.inputxlsites,
+        args.fastaindex,
+        args.outputpath,
+        args.window,
+        args.smoothing,
+        args.minctrl,
+        args.maxctrl,
+        args.maxincl,
+        args.maxfdr,
+        args.maxenh,
+        args.minsil
+        )
 
 def get_coverage_plot(xl_bed, df, fai, window):
     """Return coverage of xl_bed items around df features extended by windows"""
@@ -2468,21 +2517,21 @@ def run_rna_map(de_file, xl_bed, fai, window=300, smoothing=15,
 
  
 if __name__=='__main__':
-    import sys
-
-    de_file = sys.argv[1]
-    xl_bed = sys.argv[2]
-    fai = sys.argv[3]
-    output_folder= sys.argv[4]
-    window = int(sys.argv[5])#300
-    smoothing = int(sys.argv[6])#15 
-    min_ctrl = float(sys.argv[7])#-0.05
-    max_ctrl = float(sys.argv[8])#0.05
-    max_inclusion= float(sys.argv[9])#0.9
-    max_fdr = float(sys.argv[10])#0.1
-    max_enh = float(sys.argv[11])#-0.05
-    min_sil = float(sys.argv[12])#0.05
-    min_prob_whippet = float(sys.argv[13])#0.9
+    (
+        de_file,
+        xl_bed,
+        fai,
+        output_folder,
+        window,
+        smoothing, 
+        min_ctrl,
+        max_ctrl,
+        max_inclusion,
+        max_fdr,
+        max_enh,
+        min_sil
+    ) = cli()
     
     run_rna_map(de_file, xl_bed, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, min_prob_whippet, output_folder)
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder)
+
