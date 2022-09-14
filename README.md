@@ -1,5 +1,38 @@
-## rna_maps
+## RNA maps
 Author: aram.amalietti@gmail.com
+
+**Quick Start**
+
+Create a conda environment with all dependencies and activate it:
+
+```
+conda env create -f environment.yml
+conda activate rnamaps
+```
+
+Then run the test dataset to check the code is working:
+
+```
+python3 \
+rna_maps.py \
+test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
+test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
+test/GRCh38.release34.primary_assembly.genome.fa.fai \
+. \
+1000 \
+15 \
+-0.05 \
+0.05 \
+0.9 \
+0.1 \
+-0.05 \
+0.05 \
+0.9
+```
+*Preparing RNA-Seq data*:
+
+This code accepts rMATs junction only quantified files, or Whippet.
+Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
 
 
 **Dependencies** (these are the versions the script was developped with, pandas >= 1 introduced breaking changes, please use these versions):
@@ -12,10 +45,6 @@ matplotlib=3.3.2
 seaborn=0.11.0
 scipy=1.3.1
 ```
-**Preparing RNA-Seq data**:
-
-This code accepts rMATs junction only quantified files, or Whippet.
-Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
 
 **Usage**:  
 ```
