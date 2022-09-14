@@ -15,9 +15,9 @@ Then run the test dataset to check the code is working:
 ```
 python3 \
 rna_maps.py \
-test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
-test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
-test/GRCh38.release34.primary_assembly.genome.fa.fai
+-i test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
+-x test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
+-f test/GRCh38.release34.primary_assembly.genome.fa.fai
 ```
 *Preparing RNA-Seq data*:
 
