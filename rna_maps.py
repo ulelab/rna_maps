@@ -110,17 +110,6 @@ def get_3ss5ss_exons(df_exons):
     return exons_3ss[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]], exons_5ss[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]]
 
 
-def get_3ss5ss_exons_whippet(df_exons):
-    exons_stranded = df_exons.copy()
-    exons_stranded.loc[df_exons['strand'] == '-', 'start'] = df_exons['end'] # replace start with end
-    exons_stranded.loc[df_exons['strand'] == '-', 'end'] = df_exons['start'] # replace end with start
-    exons_3ss = exons_stranded[['chrom', 'start', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']].copy() # takes all the starts for 3ss
-    exons_5ss = exons_stranded[['chrom', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']].copy() # takes all the ends for 5ss
-    exons_3ss['end'] = exons_3ss['start'] + 1 # calculates end from start
-    exons_5ss['start'] = exons_5ss['end'] # assigns start to end for 5ss
-    exons_5ss['end'] = exons_5ss['start'] + 1 # calulates end from start
-    return exons_3ss[['chrom', 'start', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']], exons_5ss[
-        ['chrom', 'start', 'end', 'DeltaPsi', 'Probability', 'strand', 'exon_len', 'inclusion', '14']]
 
 
 def run_rna_map(de_file, xl_bed, fai, window, smoothing, 
@@ -134,152 +123,43 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
     if 'exonStart_0base' in rmats.columns:
         rmats = rmats[rmats['chr'].isin(chroms)]
         rmats['inclusion'] = (rmats.IncLevel1.str.split(',') + rmats.IncLevel2.str.split(','))
-        rmats['inclusion'] = rmats['inclusion'].apply(lambda x: sum([float(y) for y in x if y != 'NA']) / len(x))
-        
+        # code below for mean inclusion
+        # rmats['inclusion'] = rmats['inclusion'].apply(lambda x: sum([float(y) for y in x if y != 'NA']) / len(x))
+        # replaces with max inclusion
+        rmats['inclusion'] = rmats['inclusion'].apply(lambda x: max([float(y) for y in x if y != 'NA']))
         df_rmats =  rmats.loc[ : ,['chr', 'exonStart_0base', 'exonEnd', 'FDR', 'IncLevelDifference', 'strand', 'inclusion', 
                                    'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE']].rename(
-            columns={'chr': 0, 'exonStart_0base': 1, 'exonEnd': 2, 'FDR': 3, 'IncLevelDifference': 4, 'strand': 5, 'inclusion': 6, 
-                     'upstreamES': 7, 'upstreamEE': 8, 'downstreamES': 9, 'downstreamEE': 10})
+            columns={'IncLevelDifference': 'dPSI', 'inclusion':'maxPSI'}).reset_index()
+   
         
-        df_rmats = df_rmats.reset_index()
-        df_rmats = df_rmats.rename(columns={'index': 14})
-        
-        df_rmats_ctrl = df_rmats[(df_rmats[4] > min_ctrl) & (df_rmats[4] < max_ctrl) &
-                                      (df_rmats[6] < max_inclusion) & (df_rmats[3] > max_fdr)]#.rename(columns=col_rename)
-        df_rmats_const = df_rmats[(df_rmats[4] > min_ctrl) & (df_rmats[4] < max_ctrl) &
-                                      (df_rmats[6] > max_inclusion) & (df_rmats[3] > max_fdr)]#.rename(columns=col_rename)
-        df_rmats_enh = df_rmats[(df_rmats[4] < max_enh) & (df_rmats[3] < max_fdr)]#.rename(columns=col_rename)
-        df_rmats_sil = df_rmats[(df_rmats[4] > min_sil) & (df_rmats[3] < max_fdr)]#.rename(columns=col_rename)
-        df_rmats_enhrest = df_rmats[(df_rmats[4] < max_enh) & (df_rmats[3] >= max_fdr)]#.rename(columns=col_rename)
-        df_rmats_silrest = df_rmats[(df_rmats[4] > min_sil) & (df_rmats[3] >= max_fdr)]#.rename(columns=col_rename)
-        
-        print('All exons in the rmats file')
-        print('df_rmats_ctrl', len(df_rmats_ctrl))
-        print('df_rmats_const', len(df_rmats_const))
-        print('df_rmats_enh', len(df_rmats_enh))
-        print('df_rmats_sil', len(df_rmats_sil))
-        print('df_rmats_enhrest', len(df_rmats_enhrest))
-        print('df_rmats_silrest', len(df_rmats_silrest))
-        print()
+        # to deduplicate, first select the most extreme dPSI value for every exon (keep ties, they will be resolved by the hierarchy)
+        df_rmats = df_rmats[df_rmats.groupby(['chr', 'exonStart_0base', 'exonEnd', 'strand'])['dPSI'].apply(lambda x: abs(x).rank(ascending=False) < 2)]
 
-        df_rmats_ctrl.drop_duplicates(subset=[1, 2], inplace=True)
-        df_rmats_const.drop_duplicates(subset=[1, 2], inplace=True)
-        df_rmats_enh.drop_duplicates(subset=[1, 2], inplace=True)
-        df_rmats_sil.drop_duplicates(subset=[1, 2], inplace=True)
-        df_rmats_enhrest.drop_duplicates(subset=[1, 2], inplace=True)
-        df_rmats_silrest.drop_duplicates(subset=[1, 2], inplace=True)
+        # then apply hierarchy to decide which category exons belong to
+        conditions = [
+            (df_rmats["dPSI"].gt(min_sil) & df_rmats["FDR"].lt(max_fdr)), # silenced
+            (df_rmats["dPSI"].lt(max_enh) & df_rmats["FDR"].lt(max_fdr)), # enhanced
+            (df_rmats["dPSI"].gt(min_sil)), # silenced rest
+            (df_rmats["dPSI"].lt(max_enh)), # enhanced rest
+            (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl) & df_rmats["maxPSI"].gt(max_inclusion)), # constituitive
+            (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl))# control
+        ]
 
-        print('Exons after deduplication')
-        print('df_rmats_ctrl', len(df_rmats_ctrl))
-        print('df_rmats_const', len(df_rmats_const))
-        print('df_rmats_enh', len(df_rmats_enh))
-        print('df_rmats_sil', len(df_rmats_sil))
-        print('df_rmats_enhrest', len(df_rmats_enhrest))
-        print('df_rmats_silrest', len(df_rmats_silrest))
-        print()
+        choices = ["silenced", "enhanced", "silenced_rest", "enhanced_rest", "constituitive", "control"]
 
-        df_rmats_sil = df_rmats_sil[~(
-            ((df_rmats_sil[1].isin(df_rmats_enh[1])) & (df_rmats_sil[2].isin(df_rmats_enh[2])))
-            )]
+        df_rmats["category"] = np.select(conditions, choices, default=None)
 
-        df_rmats_enh = df_rmats_enh[~(
-            ((df_rmats_enh[1].isin(df_rmats_sil[1])) & (df_rmats_enh[2].isin(df_rmats_sil[2])))
-            )]
+        # logging info
+        print("Exons in each category:")
+        print(df_rmats.groupby('category').size())
+        print("Total categorised deduplicated exons: ", str(df_rmats.shape[0]))
 
-        df_rmats_silrest = df_rmats_silrest[~(
-            ((df_rmats_silrest[1].isin(df_rmats_enhrest[1])) & (df_rmats_silrest[2].isin(df_rmats_enhrest[2]))) |\
-            ((df_rmats_silrest[1].isin(df_rmats_sil[1])) & (df_rmats_silrest[2].isin(df_rmats_sil[2]))) |\
-            ((df_rmats_silrest[1].isin(df_rmats_enh[1])) & (df_rmats_silrest[2].isin(df_rmats_enh[2])))
-            )]
+        ####### Exon lengths #######
+        df_rmats["exon_length"]
+        df_rmats["upstream_exon_length"]
+        df_rmats["downstream_exon_length"]
 
-        df_rmats_enhrest = df_rmats_enhrest[~(
-            ((df_rmats_enhrest[1].isin(df_rmats_enhrest[1])) & (df_rmats_enhrest[2].isin(df_rmats_silrest[2]))) |\
-            ((df_rmats_enhrest[1].isin(df_rmats_sil[1])) & (df_rmats_enhrest[2].isin(df_rmats_sil[2]))) |\
-            ((df_rmats_enhrest[1].isin(df_rmats_enh[1])) & (df_rmats_enhrest[2].isin(df_rmats_enh[2])))
-            )]
-
-        df_rmats_ctrl = df_rmats_ctrl[~(
-            ((df_rmats_ctrl[1].isin(df_rmats_sil[1])) & (df_rmats_ctrl[2].isin(df_rmats_sil[2]))) |\
-            ((df_rmats_ctrl[1].isin(df_rmats_enh[1])) & (df_rmats_ctrl[2].isin(df_rmats_enh[2]))) |\
-            ((df_rmats_ctrl[1].isin(df_rmats_silrest[1])) & (df_rmats_ctrl[2].isin(df_rmats_silrest[2]))) |\
-            ((df_rmats_ctrl[1].isin(df_rmats_enhrest[1])) & (df_rmats_ctrl[2].isin(df_rmats_enhrest[2])))
-            )]
-
-        df_rmats_const = df_rmats_const[~(
-            ((df_rmats_const[1].isin(df_rmats_sil[1])) & (df_rmats_const[2].isin(df_rmats_sil[2]))) |\
-            ((df_rmats_const[1].isin(df_rmats_enh[1])) & (df_rmats_const[2].isin(df_rmats_enh[2]))) |\
-            ((df_rmats_const[1].isin(df_rmats_silrest[1])) & (df_rmats_const[2].isin(df_rmats_silrest[2]))) |\
-            ((df_rmats_const[1].isin(df_rmats_enhrest[1])) & (df_rmats_const[2].isin(df_rmats_enhrest[2]))) |\
-            ((df_rmats_const[1].isin(df_rmats_ctrl[1])) & (df_rmats_const[2].isin(df_rmats_ctrl[2])))
-            )]
-
-        print('Exons after filtering for overlaps between classes')
-        print('df_rmats_ctrl', len(df_rmats_ctrl))
-        print('df_rmats_const', len(df_rmats_const))
-        print('df_rmats_enh', len(df_rmats_enh))
-        print('df_rmats_sil', len(df_rmats_sil))
-        print('df_rmats_enhrest', len(df_rmats_enhrest))
-        print('df_rmats_silrest', len(df_rmats_silrest))
-
-        
-        
-#         df_rmats =  rmats.loc[ : ,['chr', 'exonStart_0base', 'exonEnd', 'FDR', 'IncLevelDifference', 'strand', 'inclusion', 
-#                                    'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE']].rename(
-#             columns={'chr': 0, 'exonStart_0base': 1, 'exonEnd': 2, 'FDR': 3, 'IncLevelDifference': 4, 'strand': 5, 'inclusion': 6, 
-#                      'upstreamES': 7, 'upstreamEE': 8, 'downstreamES': 9, 'downstreamEE': 10})
-        print('Using rmats output file')
-        de_source = 'rmats'
-        df_rmats_ctrl[11] = df_rmats_ctrl[2] - df_rmats_ctrl[1] # calculate exon length
-        df_rmats_ctrl[12] = df_rmats_ctrl[8] - df_rmats_ctrl[7] # calculate exon length
-        df_rmats_ctrl[13] = df_rmats_ctrl[10] - df_rmats_ctrl[9] #  calculate exon length
-        
-        df_rmats_const[11] = df_rmats_const[2] - df_rmats_const[1] # calculate exon length
-        df_rmats_const[12] = df_rmats_const[8] - df_rmats_const[7] # calculate exon length
-        df_rmats_const[13] = df_rmats_const[10] - df_rmats_const[9]
-        
-        df_rmats_sil[11] = df_rmats_sil[2] - df_rmats_sil[1] # calculate exon length
-        df_rmats_sil[12] = df_rmats_sil[8] - df_rmats_sil[7] # calculate exon length
-        df_rmats_sil[13] = df_rmats_sil[10] - df_rmats_sil[9]
-        
-        df_rmats_enh[11] = df_rmats_enh[2] - df_rmats_enh[1] # calculate exon length
-        df_rmats_enh[12] = df_rmats_enh[8] - df_rmats_enh[7] # calculate exon length
-        df_rmats_enh[13] = df_rmats_enh[10] - df_rmats_enh[9]
-        
-        df_rmats_silrest[11] = df_rmats_silrest[2] - df_rmats_silrest[1] # calculate exon length
-        df_rmats_silrest[12] = df_rmats_silrest[8] - df_rmats_silrest[7] # calculate exon length
-        df_rmats_silrest[13] = df_rmats_silrest[10] - df_rmats_silrest[9]
-        
-        df_rmats_enhrest[11] = df_rmats_enhrest[2] - df_rmats_enhrest[1] # calculate exon length
-        df_rmats_enhrest[12] = df_rmats_enhrest[8] - df_rmats_enhrest[7] # calculate exon length
-        df_rmats_enhrest[13] = df_rmats_enhrest[10] - df_rmats_enhrest[9]
-        
-    elif 'DeltaPsi' in rmats.columns:
-        rmats = pd.read_csv(de_file, sep='\t', index_col=False)
-        df_rmats = rmats[rmats['Type'] == 'CE']
-        df_rmats['chrom'] = df_rmats['Coord'].apply(lambda x: x.split(':')[0])
-        df_rmats = df_rmats[df_rmats['chrom'].isin(chroms)]
-        df_rmats['start'] = df_rmats['Coord'].apply(lambda x: x.split(':')[1].split('-')[0])
-        df_rmats['start'] = df_rmats['start'].astype(int)
-        df_rmats['end'] = df_rmats['Coord'].apply(lambda x: x.split(':')[1].split('-')[1])
-        df_rmats['end'] = df_rmats['end'].astype(int)
-        df_rmats = df_rmats.rename(columns={'Strand': 'strand'})
-        print('Using whippet output file')
-        de_source = 'whippet'
-        df_rmats['inclusion'] = (df_rmats['Psi_A'] + df_rmats['Psi_B']) / 2
-        df_rmats['exon_len'] = df_rmats['end'] - df_rmats['start'] # calculate exon length
-    else:
-        df_rmats = pd.read_csv(de_file, sep='\t', header=None, index_col=None, 
-                               dtype={0: 'str', 1: 'int', 2: 'int', 3: 'str', 4: 'float', 5: 'str'})
-        try:
-            df_rmats[3] = df_rmats[3].astype(float) # check if there is a numerical value that can be used for filtering e.g. FDR
-        except: # if not assume all events are to be used
-            del df_rmats[3]
-            df_rmats[3] = 0.0 #non rmats files will probably not have FDR in 4th column so this value will make pass all
-            df_rmats[6] = 0.0 #non rmats files will probably not have inclusion in 7th column so this value will make pass all
-            df_rmats = df_rmats[[0, 1, 2, 3, 4, 5, 6]]
-
-    df_rmats = df_rmats.reset_index()
-    df_rmats = df_rmats.rename(columns={'index': 14})
+        sys.exit
 
     if de_source == 'rmats':
         df_rmats_enh_3ss, df_rmats_enh_5ss = get_3ss5ss_exons(df_rmats_enh)
@@ -415,20 +295,7 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
     
 
     col_bed = ['chr', 'start', 'end', 'name', 'score', 'strand']
-    if de_source == 'whippet':
-        rename_cols = {'chrom': 'chr', 'DeltaPsi': 'name', 'Probability': 'score'}
-        df_rmats_enh_3ss = df_rmats_enh_3ss.rename(columns=rename_cols)
-        df_rmats_enh_5ss = df_rmats_enh_5ss.rename(columns=rename_cols)
-        df_rmats_sil_3ss = df_rmats_sil_3ss.rename(columns=rename_cols)
-        df_rmats_sil_5ss = df_rmats_sil_5ss.rename(columns=rename_cols)
-        df_rmats_ctrl_3ss = df_rmats_ctrl_3ss.rename(columns=rename_cols)
-        df_rmats_ctrl_5ss = df_rmats_ctrl_5ss.rename(columns=rename_cols)
-        df_rmats_enhrest_3ss = df_rmats_enhrest_3ss.rename(columns=rename_cols)
-        df_rmats_enhrest_5ss = df_rmats_enhrest_5ss.rename(columns=rename_cols)
-        df_rmats_silrest_3ss = df_rmats_silrest_3ss.rename(columns=rename_cols)
-        df_rmats_silrest_5ss = df_rmats_silrest_5ss.rename(columns=rename_cols)
-        df_rmats_const_3ss = df_rmats_const_3ss.rename(columns=rename_cols)
-        df_rmats_const_5ss = df_rmats_const_5ss.rename(columns=rename_cols)
+
     
     df_enh_3ss, df_coverage_enh_3ss, df_raw_enh_3ss = get_coverage_plot(xl_bed, df_rmats_enh_3ss[col_bed], fai, window)
     df_enh_3ss = df_enh_3ss.rename(columns={'coverage': 'enhanced'})
