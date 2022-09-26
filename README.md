@@ -83,3 +83,56 @@ optional arguments:
                         minimum inclusion for exons to be considered silenced
                         [DEFAULT 0.05] 
 ```
+
+### Definitions
+
+**Event types**
+
+Control: An event that doesn't change in inclusion (PSI) in this RBP knockdown, but might in another circumstance. Typical definition:
+
+```
+dPSI   ( -1 <---------- - 0.05xxxxx0xxxxx0.05----------> 1 )
+maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9------> 1 )
+FDR    (  0 xxxxx0.1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx> 1 )
+```
+
+Constituitive: An event that doesn't change in inclusion (PSI) in this RBP knockdown, but is unlikely to change in another circumstance. Typically defined as a control event *plus* have a maximum inclusion (PSI) of > 0.9-0.99.
+
+```
+dPSI   ( -1 <---------- - 0.05xxxxx0xxxxx0.05----------> 1 )
+maxPSI (  0 ----------------------------------0.9xxxxxx> 1 )
+FDR    (  0 xxxxx0.1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx> 1 )
+```
+
+Enhanced: An event that is *less* included in RBP knockdown, suggesting the RBP *promotes/enhances* inclusion of the event.
+
+```
+dPSI   ( -1 <xxxxxxxxxxx- 0.05-----0-----0.05----------> 1 )
+maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9xxxxxx> 1 )
+FDR    (  0 xxxxx0.1-----------------------------------> 1 )
+```
+
+Silenced: An event that is *more* included in RBP knockdown, suggesting the RBP *represses/silences* inclusion of the event.
+
+```
+dPSI   ( -1 <---------- - 0.05-----0-----0.05xxxxxxxxxx> 1 )
+maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9xxxxxx> 1 )
+FDR    (  0 xxxxx0.1-----------------------------------> 1 )
+```
+
+Enhanced/Silenced rest: A silenced or enhanced event where the FDR does not fall below the threshold.
+
+```
+dPSI   (            As in silenced or enhanced             )
+maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9xxxxxx> 1 )
+FDR    (  0 -----0.1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx> 1 )
+```
+
+**Heirarchy**
+
+When it comes to alternative exons, an exon may be involved in multiple events, but we want to avoid plotting it many times, so we implement a heirarchy:
+
+1. If an exon meets criteria for silenced or enhanced this is designated, if criteria for both is met the most extreme dPSI value is preferred.
+2. Of remaining exons, if they meet criteria for enhanced/silenced rest this is designated, if criteria for both is met the most extreme dPSI value is preferred.
+3. Of remaining exons, if they meet critera for constituitive, this is designated.
+4. Of remaining exons, if they meet critera for control, this is designated.
