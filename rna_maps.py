@@ -155,108 +155,48 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
         print("Total categorised deduplicated exons: ", str(df_rmats.shape[0]))
 
         ####### Exon lengths #######
-        df_rmats["exon_length"]
-        df_rmats["upstream_exon_length"]
-        df_rmats["downstream_exon_length"]
+        df_rmats["regulated_exon_length"] = df_rmats['exonEnd'] - df_rmats['exonStart_0base']
+        df_rmats["upstream_exon_length"] = df_rmats['upstreamEE'] - df_rmats['upstreamES']
+        df_rmats["downstream_exon_length"] = df_rmats['downstreamEE'] - df_rmats['downstreamES']
 
-        sys.exit
-
-    if de_source == 'rmats':
-        df_rmats_enh_3ss, df_rmats_enh_5ss = get_3ss5ss_exons(df_rmats_enh)
-        print(f'There are: {len(df_rmats_enh_3ss)} 3ss and {len(df_rmats_enh_5ss)} 5ss enhanced exons')
-        df_rmats_sil_3ss, df_rmats_sil_5ss = get_3ss5ss_exons(df_rmats_sil)
-        print(f'There are: {len(df_rmats_sil_3ss)} 3ss and {len(df_rmats_sil_5ss)} 5ss silenced exons')
-        df_rmats_enhrest_3ss, df_rmats_enhrest_5ss = get_3ss5ss_exons(df_rmats_enhrest)
-        print(f'There are: {len(df_rmats_enhrest_3ss)} 3ss and {len(df_rmats_enhrest_5ss)} 5ss possibly enhanced exons with FDR that is to hight')
-        df_rmats_silrest_3ss, df_rmats_silrest_5ss = get_3ss5ss_exons(df_rmats_silrest)
-        print(f'There are: {len(df_rmats_silrest_3ss)} 3ss and {len(df_rmats_silrest_5ss)} 5ss possibly silenced exons with FDR that is to hight')
-        df_rmats_ctrl_3ss, df_rmats_ctrl_5ss = get_3ss5ss_exons(df_rmats_ctrl)
-        print(f'There are: {len(df_rmats_ctrl_3ss)} 3ss and {len(df_rmats_ctrl_5ss)} 5ss control exons')
-        df_rmats_const_3ss, df_rmats_const_5ss = get_3ss5ss_exons(df_rmats_const)
-        print(f'There are: {len(df_rmats_const_3ss)} 3ss and {len(df_rmats_const_5ss)} 5ss constitutive exons')
+        exon_length_df = df_rmats[["regulated_exon_length","upstream_exon_length","downstream_exon_length","category"]]
+        print(exon_length_df.head())
+        exon_length_df = exon_length_df .melt(id_vars=["category"], var_name="exon_type", value_name="exon_length")
         
-        col_rename = {0: 'chr', 1: 'start', 2: 'end', 3: 'name', 4: 'score', 5: 'strand', 6:'inclusion', 7: 'upstream_es', 
-            8: 'upstream_ee', 9: 'downstream_es', 10: 'downstream_ee' , 11: 'exon_len', 12: 'upstream_exon_len', 13: 'downstream_exon_len'
-                     }
-        
-        df_rmats_enh_3ss = df_rmats_enh_3ss.rename(columns=col_rename)
-        df_rmats_enh_5ss = df_rmats_enh_5ss.rename(columns=col_rename)
-        df_rmats_sil_3ss = df_rmats_sil_3ss.rename(columns=col_rename)
-        df_rmats_sil_5ss = df_rmats_sil_5ss.rename(columns=col_rename)
-        df_rmats_enhrest_3ss = df_rmats_enhrest_3ss.rename(columns=col_rename)
-        df_rmats_enhrest_5ss = df_rmats_enhrest_5ss.rename(columns=col_rename)
-        df_rmats_silrest_3ss = df_rmats_silrest_3ss.rename(columns=col_rename)
-        df_rmats_silrest_5ss = df_rmats_silrest_5ss.rename(columns=col_rename)
-        df_rmats_ctrl_3ss = df_rmats_ctrl_3ss.rename(columns=col_rename)
-        df_rmats_ctrl_5ss = df_rmats_ctrl_5ss.rename(columns=col_rename)
-        df_rmats_const_3ss = df_rmats_const_3ss.rename(columns=col_rename)
-        df_rmats_const_5ss = df_rmats_const_5ss.rename(columns=col_rename)
+        print(exon_length_df.head())
 
-        index_selected = df_rmats_ctrl_3ss.index.union(df_rmats_enh_3ss.index.union(
-            df_rmats_sil_3ss.index.union(df_rmats_enhrest_3ss.index.union(df_rmats_silrest_3ss.index.union(df_rmats_const_3ss.index)))))
+        palette_exon_len = [colors_dict['ctrl'], colors_dict['const'], colors_dict['enh'], 
+                            colors_dict['enhrest'], colors_dict['sil'], colors_dict['silrest'], colors_dict['all']]
+        sns.set(rc={'figure.figsize':(15, 5)})
+        sns.set_style("whitegrid")
+        g = sns.catplot(data=exon_length_df, x='category', y='exon_length',col='exon_type', 
+                    kind='box', col_wrap=3, showfliers=False,
+                    col_order=["upstream_exon_length","regulated_exon_length","downstream_exon_length"],
+                    order=["control","constituitive","enhanced","enhanced_rest","silenced","silenced_rest"],
+                    palette = palette_exon_len)
+        titles = ["Upstream Exon", "Middle Exon", "Downstream exon"]
+        for ax, title in zip(g.axes.flat, titles):
+            ax.set_title(title)
+        g.set_xticklabels(rotation=45)
+        g.set(xlabel=None)
+        g.axes[0].set_ylabel('Exon length (bp)')
+        plt.tight_layout()
+        plt.savefig(f'{output_dir}/{name}_exon_length.pdf')
+        pbt.helpers.cleanup()
 
-                
+
+        sys.exit()
+
+
     if len(df_rmats_ctrl_3ss) == 0:
         print('No control exons, try changing filtering parameters or file')
         return
     if len(df_rmats_enh_3ss) == 0 and len(df_rmats_sil_3ss) == 0:
         print('No regulated exons, try changing filtering parameters or file')
         return
-#     if de_source == 'rmats':
-#         exon_len_all = df_rmats[11]
-#     elif de_source == 'whippet':
-#         exon_len_all = df_rmats['exon_len']
-    
-    df_rmats_ctrl_3ss['exon_len'] = df_rmats_ctrl_3ss['end'] - df_rmats_ctrl_3ss['start']
-    df_rmats_enh_3ss['exon_len'] = df_rmats_enh_3ss['end'] - df_rmats_enh_3ss['start']
-    df_rmats_sil_3ss['exon_len'] = df_rmats_sil_3ss['end'] - df_rmats_sil_3ss['start']
-    df_rmats_enhrest_3ss['exon_len'] = df_rmats_enhrest_3ss['end'] - df_rmats_enhrest_3ss['start']
-    df_rmats_silrest_3ss['exon_len'] = df_rmats_silrest_3ss['end'] - df_rmats_silrest_3ss['start']
-    df_rmats_const_3ss['exon_len'] = df_rmats_const_3ss['end'] - df_rmats_const_3ss['start']
-    
-    
-    exon_len_all = list(df_rmats_ctrl_3ss['exon_len']) + list(df_rmats_enh_3ss['exon_len'] )+ list(df_rmats_sil_3ss['exon_len'])  \
-        + list(df_rmats_enhrest_3ss['exon_len']) + list(df_rmats_silrest_3ss['exon_len']) + list(df_rmats_const_3ss['exon_len'])
-    exon_len_ctrl = df_rmats_ctrl_3ss['exon_len']
-    exon_len_enh = df_rmats_enh_3ss['exon_len']
-    exon_len_sil = df_rmats_sil_3ss['exon_len']
-    exon_len_enhrest = df_rmats_enhrest_3ss['exon_len']
-    exon_len_silrest = df_rmats_silrest_3ss['exon_len']
-    exon_len_const = df_rmats_const_3ss['exon_len']
-    df_exon_len = pd.DataFrame(data={'enhanced': exon_len_enh, 'enhanced_rest': exon_len_enhrest, 'silenced': exon_len_sil, 
-            'silenced_rest': exon_len_silrest, 'control': exon_len_ctrl, 
-            'constitutive': exon_len_const, 'all_exons': exon_len_all})
-    
-    if de_source == 'rmats':
-        upstream_exon_len_all = list(df_rmats_ctrl_3ss['upstream_exon_len']) + list(df_rmats_enh_3ss['upstream_exon_len']) + \
-            list(df_rmats_sil_3ss['upstream_exon_len']) + list(df_rmats_enhrest_3ss['upstream_exon_len']) + \
-            list(df_rmats_silrest_3ss['upstream_exon_len']) + list(df_rmats_const_3ss['upstream_exon_len'])
-        upstream_exon_len_ctrl = df_rmats_ctrl_3ss['upstream_exon_len']
-        upstream_exon_len_enh = df_rmats_enh_3ss['upstream_exon_len']
-        upstream_exon_len_sil = df_rmats_sil_3ss['upstream_exon_len']
-        upstream_exon_len_enhrest = df_rmats_enhrest_3ss['upstream_exon_len']
-        upstream_exon_len_silrest = df_rmats_silrest_3ss['upstream_exon_len']
-        upstream_exon_len_const = df_rmats_const_3ss['upstream_exon_len']
-        df_upstream_exon_len = pd.DataFrame(data={'enhanced': upstream_exon_len_enh, 'enhanced_rest': upstream_exon_len_enhrest, 'silenced': upstream_exon_len_sil, 
-            'silenced_rest': upstream_exon_len_silrest, 'control': upstream_exon_len_ctrl, 
-            'constitutive': upstream_exon_len_const, 'all_exons': upstream_exon_len_all})
 
-        downstream_exon_len_all = list(df_rmats_ctrl_3ss['downstream_exon_len']) + list(df_rmats_enh_3ss['downstream_exon_len']) + \
-            list(df_rmats_sil_3ss['downstream_exon_len']) + list(df_rmats_enhrest_3ss['downstream_exon_len']) + \
-            list(df_rmats_silrest_3ss['downstream_exon_len']) + list(df_rmats_const_3ss['downstream_exon_len'])
-        downstream_exon_len_ctrl = df_rmats_ctrl_3ss['downstream_exon_len']
-        downstream_exon_len_enh = df_rmats_enh_3ss['downstream_exon_len']
-        downstream_exon_len_sil = df_rmats_sil_3ss['downstream_exon_len']
-        downstream_exon_len_enhrest = df_rmats_enhrest_3ss['downstream_exon_len']
-        downstream_exon_len_silrest = df_rmats_silrest_3ss['downstream_exon_len']
-        downstream_exon_len_const = df_rmats_const_3ss['downstream_exon_len']
-        df_downstream_exon_len = pd.DataFrame(data={  
-             'enhanced': downstream_exon_len_enh, 'enhanced_rest': downstream_exon_len_enhrest, 'silenced': downstream_exon_len_sil, 
-            'silenced_rest': downstream_exon_len_silrest, 'control': downstream_exon_len_ctrl, 
-            'constitutive': downstream_exon_len_const, 'all_exons': downstream_exon_len_all})
-        
     
-    if de_source == 'rmats':
+
         sns.set(rc={'figure.figsize':(15, 5)})
         sns.set_style("whitegrid")
         palette_exon_len = [colors_dict['enh'], colors_dict['enhrest'], colors_dict['sil'], colors_dict['silrest'],
@@ -277,21 +217,7 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
         plt.tight_layout()
         fig05.savefig(f'{output_dir}/{name}_exon_len.pdf')
     
-    # if output_exons:
-    #     name = de_file.split('/')[-1].split('_')[0]
-    #     df_rmats_ctrl_3ss.to_csv(f'{output_dir}/{name}_{de_source}_ctrl_3ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_ctrl_5ss.to_csv(f'{output_dir}/{name}_{de_source}_ctrl_5ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_enh_3ss.to_csv(f'{output_dir}/{name}_{de_source}_enh_3ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_enh_5ss.to_csv(f'{output_dir}/{name}_{de_source}_enh_5ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_sil_3ss.to_csv(f'{output_dir}/{name}_{de_source}_sil_3ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_sil_5ss.to_csv(f'{output_dir}/{name}_{de_source}_sil_5ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_enhrest_3ss.to_csv(f'{output_dir}/{name}_{de_source}_enhrest_3ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_enhrest_5ss.to_csv(f'{output_dir}/{name}_{de_source}_enhrest_5ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_silrest_3ss.to_csv(f'{output_dir}/{name}_{de_source}_silrest_3ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_silrest_5ss.to_csv(f'{output_dir}/{name}_{de_source}_silrest_5ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_const_3ss.to_csv(f'{output_dir}/{name}_{de_source}_const_3ss.tsv', sep='\t', index=None, header=None)
-    #     df_rmats_const_5ss.to_csv(f'{output_dir}/{name}_{de_source}_const_5ss.tsv', sep='\t', index=None, header=None)
-    #     print('Exons saved in tsv files')
+
     
 
     col_bed = ['chr', 'start', 'end', 'name', 'score', 'strand']
