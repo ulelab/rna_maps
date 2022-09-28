@@ -64,20 +64,65 @@ def cli():
         args.minsil
         )
 
-def get_coverage_plot(xl_bed, df, fai, window):
+def df_apply(col_fn, *col_names):
+    def inner_fn(df):
+        cols = [df[col] for col in col_names]
+        return col_fn(*cols)
+    return inner_fn
+
+def get_ss_bed(df, pos_col, neg_col):
+    ss_pos = df.loc[df['strand'] == "+", ['chr', pos_col, pos_col, 'category', 'FDR', 'strand']]
+    ss_pos.columns = ['chr', 'start', 'end', 'name', 'score', 'strand']
+    ss_pos.start = ss_pos.start.transform(lambda x: x-1)
+
+    ss_n = df.loc[df['strand'] == "-", ['chr', neg_col, neg_col, 'category', 'FDR', 'strand']]
+    ss_n.columns = ['chr', 'start', 'end', 'name', 'score', 'strand']
+    ss_n.end = ss_n.end.transform(lambda x: x+1)
+
+    ss = pd.concat([ss_pos, ss_n])
+
+    return ss
+
+def get_coverage_plot(xl_bed, df, fai, window, exon_categories):
     """Return coverage of xl_bed items around df features extended by windows"""
+    df = df.loc[df.name != "."]
     xl_bed = pbt.BedTool(xl_bed).sort()
     pbt_df = pbt.BedTool.from_dataframe(df[['chr', 'start', 'end', 'name', 'score', 'strand']]).sort().slop(l=window, r=window, s=True, g=fai)    
-    df_coverage = pbt_df.coverage(b=xl_bed, **{'sorted': True, 's': True, 'd': True, 'nonamecheck': True}).to_dataframe()[
-        ['thickStart', 'thickEnd', 'strand']].rename(columns={'thickStart': 'position', 'thickEnd': 'coverage'})
-    df_plot = df_coverage.groupby(['position', 'strand']).sum().reset_index()
-    df_plot.loc[df_plot.strand=='+', 'map'] = df_plot['position'].astype('int32')
-    df_plot.loc[df_plot.strand=='-', 'map'] = abs(2 * window + 2 - df_plot['position'])
-    df_plot.map = df_plot.map.astype('int32')
-    df_plot = df_plot[['coverage', 'map']].groupby('map').sum()
-    df_plot_norm = df_plot / len(df)
-    return df_plot_norm, df_coverage, df_plot
-            
+    df_coverage = pbt_df.coverage(b=xl_bed, **{'sorted': True, 's': True, 'd': True, 'nonamecheck': True}).to_dataframe()[['thickStart', 'thickEnd', 'strand', 'name']]
+    df_coverage.rename(columns=({'thickStart':'position','thickEnd':'coverage'}), inplace=True)
+
+    df_plot = df_coverage
+    
+    df_plot.loc[df_plot.strand=='+', 'position'] = df_plot['position'].astype('int32')
+    df_plot.loc[df_plot.strand=='-', 'position'] = abs(2 * window + 2 - df_plot['position'])
+
+    df_plot = df_plot.loc[df_plot.name != "."]
+    df_plot = df_plot.groupby(['name','position'], as_index=False).agg({'coverage':'sum'})
+
+    exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
+    df_plot = df_plot.merge(exon_cat, how="left")
+
+    df_plot['norm_coverage'] = np.where(df_plot['coverage'] == 0, df_plot['coverage'], df_plot['coverage']/df_plot['number_exons'])
+
+    # fisher test [covered exons, non-covered exon, control covered exons, control non-covered exons]
+    df_plot_ctrl = df_plot.loc[df_plot.name == "control"][["position","coverage","number_exons"]]
+    df_plot_ctrl.columns = ["position","control_coverage","control_number_exons"]
+    df_plot = df_plot.merge(df_plot_ctrl, how="left")
+    df_plot['control_norm_coverage'] = df_plot["control_coverage"] / df_plot["control_number_exons"]
+    df_plot['fold_change'] = df_plot["norm_coverage"] / df_plot["control_norm_coverage"]
+    
+    contingency_table = list(zip(df_plot['coverage'], df_plot['number_exons']-df_plot['coverage'], df_plot['control_coverage'], df_plot['control_number_exons'] - df_plot['control_coverage']))
+    contingency_table = [ np.array(table).reshape(2,2) for table in contingency_table ]
+    df_plot['pvalue'] = [ stats.fisher_exact(table)[1] for table in contingency_table ]
+
+    df_plot['-log10pvalue'] = np.log10(1/df_plot['pvalue'])
+
+    df_plot.loc[df_plot['fold_change'] < 1, ['-log10pvalue']] = df_plot['-log10pvalue'] * -1
+
+    print(df_plot.head())
+    sys.exit()
+    return df_plot
+        
             
 def get_exon_dist(len_df_in, df_coverage, window):
     p = 2 * window + 1
@@ -149,10 +194,21 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         df_rmats["category"] = np.select(conditions, choices, default=None)
 
+        exon_categories = df_rmats.groupby('category').size()
+        #exon_categories.columns = ["name", "exon_number"]
         # logging info
         print("Exons in each category:")
-        print(df_rmats.groupby('category').size())
+        print(exon_categories)
         print("Total categorised deduplicated exons: ", str(df_rmats.shape[0]))
+
+        ### Some warning messages ###
+        if exon_categories.loc["control"] == 0:
+            print("Warning! There are no control exons. Try changing thresholds or input file and run again.")
+            sys.exit()
+        
+        if exon_categories.loc["enhanced"] == 0 and exon_categories.loc["silenced"] == 0:
+            print('Warning! There are no regulated exons, try changing filtering parameters or file and run again.')
+            sys.exit()
 
         ####### Exon lengths #######
         df_rmats["regulated_exon_length"] = df_rmats['exonEnd'] - df_rmats['exonStart_0base']
@@ -160,13 +216,12 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
         df_rmats["downstream_exon_length"] = df_rmats['downstreamEE'] - df_rmats['downstreamES']
 
         exon_length_df = df_rmats[["regulated_exon_length","upstream_exon_length","downstream_exon_length","category"]]
-        print(exon_length_df.head())
+
         exon_length_df = exon_length_df .melt(id_vars=["category"], var_name="exon_type", value_name="exon_length")
         
-        print(exon_length_df.head())
-
         palette_exon_len = [colors_dict['ctrl'], colors_dict['const'], colors_dict['enh'], 
                             colors_dict['enhrest'], colors_dict['sil'], colors_dict['silrest'], colors_dict['all']]
+
         sns.set(rc={'figure.figsize':(15, 5)})
         sns.set_style("whitegrid")
         g = sns.catplot(data=exon_length_df, x='category', y='exon_length',col='exon_type', 
@@ -185,85 +240,53 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
         pbt.helpers.cleanup()
 
 
+        ### The coverage plot ###
+
+        middle_3ss, middle_raw_3ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'exonStart_0base','exonEnd'), fai, window, exon_categories)
+
+        print(middle_3ss)
         sys.exit()
 
+        df_enh_3ss = df_enh_3ss.rename(columns={'coverage': 'enhanced'})
+        df_enh_5ss, df_coverage_enh_5ss, df_raw_enh_5ss = get_coverage_plot(xl_bed, df_rmats_enh_5ss[col_bed], fai, window)
+        df_enh_5ss = df_enh_5ss.rename(columns={'coverage': 'enhanced'})
 
-    if len(df_rmats_ctrl_3ss) == 0:
-        print('No control exons, try changing filtering parameters or file')
-        return
-    if len(df_rmats_enh_3ss) == 0 and len(df_rmats_sil_3ss) == 0:
-        print('No regulated exons, try changing filtering parameters or file')
-        return
-
-    
-
-        sns.set(rc={'figure.figsize':(15, 5)})
-        sns.set_style("whitegrid")
-        palette_exon_len = [colors_dict['enh'], colors_dict['enhrest'], colors_dict['sil'], colors_dict['silrest'],
-                            colors_dict['ctrl'], colors_dict['const'], colors_dict['all']]
-        fig05, axs = plt.subplots(1, 3, sharey='row')
-        ax0 = sns.boxplot(data=df_upstream_exon_len, palette=palette_exon_len,
-            showfliers=False, ax=axs[0])
-        ax0.set_xticklabels(ax0.get_xticklabels(), rotation=45)
-        ax1 = sns.boxplot(data=df_exon_len, palette=palette_exon_len,
-            showfliers=False, ax=axs[1])
-        ax1.set_xticklabels(ax1.get_xticklabels(), rotation=45)
-        ax2 = sns.boxplot(data=df_downstream_exon_len, palette=palette_exon_len,
-            showfliers=False, ax=axs[2])
-        ax2.set_xticklabels(ax2.get_xticklabels(), rotation=45)
-        axs[0].set_title("Upstream exon length")
-        axs[2].set_title("Downstream exon length")
-        axs[0].set_ylabel('Exon length (bases)')
-        plt.tight_layout()
-        fig05.savefig(f'{output_dir}/{name}_exon_len.pdf')
-    
-
-    
-
-    col_bed = ['chr', 'start', 'end', 'name', 'score', 'strand']
-
-    
-    df_enh_3ss, df_coverage_enh_3ss, df_raw_enh_3ss = get_coverage_plot(xl_bed, df_rmats_enh_3ss[col_bed], fai, window)
-    df_enh_3ss = df_enh_3ss.rename(columns={'coverage': 'enhanced'})
-    df_enh_5ss, df_coverage_enh_5ss, df_raw_enh_5ss = get_coverage_plot(xl_bed, df_rmats_enh_5ss[col_bed], fai, window)
-    df_enh_5ss = df_enh_5ss.rename(columns={'coverage': 'enhanced'})
-
-    df_sil_3ss, df_coverage_sil_3ss, df_raw_sil_3ss = get_coverage_plot(xl_bed, df_rmats_sil_3ss[col_bed], fai, window)
-    df_sil_3ss = df_sil_3ss.rename(columns={'coverage': 'silenced'})
-    df_sil_5ss, df_coverage_sil_5ss, df_raw_sil_5ss = get_coverage_plot(xl_bed, df_rmats_sil_5ss[col_bed], fai, window)
-    df_sil_5ss = df_sil_5ss.rename(columns={'coverage': 'silenced'})
-    
-    df_ctrl_3ss, df_coverage_ctrl_3ss, df_raw_ctrl_3ss = get_coverage_plot(xl_bed, df_rmats_ctrl_3ss[col_bed], fai, window)
-    df_ctrl_3ss = df_ctrl_3ss.rename(columns={'coverage': 'control'})
-    df_ctrl_5ss, df_coverage_ctrl_5ss, df_raw_ctrl_5ss = get_coverage_plot(xl_bed, df_rmats_ctrl_5ss[col_bed], fai, window)
-    df_ctrl_5ss = df_ctrl_5ss.rename(columns={'coverage': 'control'})
-    
-    df_const_3ss, df_coverage_const_3ss, df_raw_const_3ss = get_coverage_plot(xl_bed, df_rmats_const_3ss[col_bed], fai, window)
-    df_const_3ss = df_const_3ss.rename(columns={'coverage': 'const'})
-    df_const_5ss, df_coverage_const_5ss, df_raw_const_5ss = get_coverage_plot(xl_bed, df_rmats_const_5ss[col_bed], fai, window)
-    df_const_5ss = df_const_5ss.rename(columns={'coverage': 'const'})
-    df_enhrest_3ss, df_coverage_enhrest_3ss, df_raw_enhrest_3ss = get_coverage_plot(xl_bed, df_rmats_enhrest_3ss[col_bed], fai, window)
-    df_enhrest_3ss = df_enhrest_3ss.rename(columns={'coverage': 'enhanced_rest'})
-    df_enhrest_5ss, df_coverage_enhrest_5ss, df_raw_enhrest_5ss = get_coverage_plot(xl_bed, df_rmats_enhrest_5ss[col_bed], fai, window)
-    df_enhrest_5ss = df_enhrest_5ss.rename(columns={'coverage': 'enhanced_rest'})
-    
-    df_silrest_3ss, df_coverage_silrest_3ss,df_raw_silrest_3ss = get_coverage_plot(xl_bed, df_rmats_silrest_3ss[col_bed], fai, window)
-    df_silrest_3ss = df_silrest_3ss.rename(columns={'coverage': 'silenced_rest'})
-    df_silrest_5ss, df_coverage_silrest_5ss, df_raw_silrest_5ss = get_coverage_plot(xl_bed, df_rmats_silrest_5ss[col_bed], fai, window)
-    df_silrest_5ss = df_silrest_5ss.rename(columns={'coverage': 'silenced_rest'})
-    
-    df_raw_enh_3ss['not_covered'] = len(df_rmats_enh_3ss) - df_raw_enh_3ss.coverage
-    df_raw_enh_5ss['not_covered'] = len(df_rmats_enh_5ss) - df_raw_enh_5ss.coverage
-    df_raw_sil_3ss['not_covered'] = len(df_rmats_sil_3ss) - df_raw_sil_3ss.coverage
-    df_raw_sil_5ss['not_covered'] = len(df_rmats_sil_5ss) - df_raw_sil_5ss.coverage
-    df_raw_ctrl_3ss['not_covered_control'] = len(df_rmats_ctrl_3ss) - df_raw_ctrl_3ss.coverage
-    df_raw_ctrl_5ss['not_covered_control'] = len(df_rmats_ctrl_5ss) - df_raw_ctrl_5ss.coverage
-    df_raw_enhrest_3ss['not_covered'] = len(df_rmats_enhrest_3ss) - df_raw_enhrest_3ss.coverage
-    df_raw_enhrest_5ss['not_covered'] = len(df_rmats_enhrest_5ss) - df_raw_enhrest_5ss.coverage
-    df_raw_silrest_3ss['not_covered'] = len(df_rmats_silrest_3ss) - df_raw_silrest_3ss.coverage
-    df_raw_silrest_5ss['not_covered'] = len(df_rmats_silrest_5ss) - df_raw_silrest_5ss.coverage
-    df_raw_const_3ss['not_covered'] = len(df_rmats_const_3ss) - df_raw_const_3ss.coverage
-    df_raw_const_5ss['not_covered'] = len(df_rmats_const_5ss) - df_raw_const_5ss.coverage
+        df_sil_3ss, df_coverage_sil_3ss, df_raw_sil_3ss = get_coverage_plot(xl_bed, df_rmats_sil_3ss[col_bed], fai, window)
+        df_sil_3ss = df_sil_3ss.rename(columns={'coverage': 'silenced'})
+        df_sil_5ss, df_coverage_sil_5ss, df_raw_sil_5ss = get_coverage_plot(xl_bed, df_rmats_sil_5ss[col_bed], fai, window)
+        df_sil_5ss = df_sil_5ss.rename(columns={'coverage': 'silenced'})
+        
+        df_ctrl_3ss, df_coverage_ctrl_3ss, df_raw_ctrl_3ss = get_coverage_plot(xl_bed, df_rmats_ctrl_3ss[col_bed], fai, window)
+        df_ctrl_3ss = df_ctrl_3ss.rename(columns={'coverage': 'control'})
+        df_ctrl_5ss, df_coverage_ctrl_5ss, df_raw_ctrl_5ss = get_coverage_plot(xl_bed, df_rmats_ctrl_5ss[col_bed], fai, window)
+        df_ctrl_5ss = df_ctrl_5ss.rename(columns={'coverage': 'control'})
+        
+        df_const_3ss, df_coverage_const_3ss, df_raw_const_3ss = get_coverage_plot(xl_bed, df_rmats_const_3ss[col_bed], fai, window)
+        df_const_3ss = df_const_3ss.rename(columns={'coverage': 'const'})
+        df_const_5ss, df_coverage_const_5ss, df_raw_const_5ss = get_coverage_plot(xl_bed, df_rmats_const_5ss[col_bed], fai, window)
+        df_const_5ss = df_const_5ss.rename(columns={'coverage': 'const'})
+        df_enhrest_3ss, df_coverage_enhrest_3ss, df_raw_enhrest_3ss = get_coverage_plot(xl_bed, df_rmats_enhrest_3ss[col_bed], fai, window)
+        df_enhrest_3ss = df_enhrest_3ss.rename(columns={'coverage': 'enhanced_rest'})
+        df_enhrest_5ss, df_coverage_enhrest_5ss, df_raw_enhrest_5ss = get_coverage_plot(xl_bed, df_rmats_enhrest_5ss[col_bed], fai, window)
+        df_enhrest_5ss = df_enhrest_5ss.rename(columns={'coverage': 'enhanced_rest'})
+        
+        df_silrest_3ss, df_coverage_silrest_3ss,df_raw_silrest_3ss = get_coverage_plot(xl_bed, df_rmats_silrest_3ss[col_bed], fai, window)
+        df_silrest_3ss = df_silrest_3ss.rename(columns={'coverage': 'silenced_rest'})
+        df_silrest_5ss, df_coverage_silrest_5ss, df_raw_silrest_5ss = get_coverage_plot(xl_bed, df_rmats_silrest_5ss[col_bed], fai, window)
+        df_silrest_5ss = df_silrest_5ss.rename(columns={'coverage': 'silenced_rest'})
+        
+        df_raw_enh_3ss['not_covered'] = len(df_rmats_enh_3ss) - df_raw_enh_3ss.coverage
+        df_raw_enh_5ss['not_covered'] = len(df_rmats_enh_5ss) - df_raw_enh_5ss.coverage
+        df_raw_sil_3ss['not_covered'] = len(df_rmats_sil_3ss) - df_raw_sil_3ss.coverage
+        df_raw_sil_5ss['not_covered'] = len(df_rmats_sil_5ss) - df_raw_sil_5ss.coverage
+        df_raw_ctrl_3ss['not_covered_control'] = len(df_rmats_ctrl_3ss) - df_raw_ctrl_3ss.coverage
+        df_raw_ctrl_5ss['not_covered_control'] = len(df_rmats_ctrl_5ss) - df_raw_ctrl_5ss.coverage
+        df_raw_enhrest_3ss['not_covered'] = len(df_rmats_enhrest_3ss) - df_raw_enhrest_3ss.coverage
+        df_raw_enhrest_5ss['not_covered'] = len(df_rmats_enhrest_5ss) - df_raw_enhrest_5ss.coverage
+        df_raw_silrest_3ss['not_covered'] = len(df_rmats_silrest_3ss) - df_raw_silrest_3ss.coverage
+        df_raw_silrest_5ss['not_covered'] = len(df_rmats_silrest_5ss) - df_raw_silrest_5ss.coverage
+        df_raw_const_3ss['not_covered'] = len(df_rmats_const_3ss) - df_raw_const_3ss.coverage
+        df_raw_const_5ss['not_covered'] = len(df_rmats_const_5ss) - df_raw_const_5ss.coverage
     
     
     df_raw_ctrl_3ss = df_raw_ctrl_3ss.rename(columns={'coverage': 'control'})
@@ -2011,44 +2034,7 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
         df_final_5ss_downstream.to_csv(f'{output_dir}/{name}_final_5ss_downstream.tsv', sep='\t', index=None)
         
     
-    # if z_test:
-    #     df_radnom_ctrl_3ss = get_random_coverage(df_coverage_3ss, window, n_exons, n_samples).rename(
-    #         columns={'mean': 'mean_ctrl', 'std': 'std_ctrl'})
-    #     df_radnom_enh_3ss = get_random_coverage(df_coverage_enh_3ss, window, n_exons, n_samples).rename(
-    #         columns={'mean': 'mean_enh', 'std': 'std_enh'})
-    #     df_radnom_sil_3ss = get_random_coverage(df_coverage_sil_3ss, window, n_exons, n_samples).rename(
-    #         columns={'mean': 'mean_sil', 'std': 'std_sil'})
-    #     df_z_score_3ss =  df_enh_3ss.merge(df_sil_3ss, left_index=True, right_index=True).merge(
-    #         df_radnom_ctrl_3ss, left_index=True, right_index=True).merge(df_ctrl_3ss, left_index=True, right_index=True).merge(
-    #     df_radnom_enh_3ss, left_index=True, right_index=True).merge(df_radnom_sil_3ss, left_index=True, right_index=True)
-    #     df_radnom_ctrl_5ss = get_random_coverage(df_coverage_5ss, window, n_exons, n_samples ).rename(
-    #         columns={'mean': 'mean_ctrl', 'std': 'std_ctrl'})
-    #     df_radnom_enh_5ss = get_random_coverage(df_coverage_enh_5ss, window, n_exons, n_samples).rename(
-    #         columns={'mean': 'mean_enh', 'std': 'std_enh'})
-    #     df_radnom_sil_5ss = get_random_coverage(df_coverage_sil_5ss, window, n_exons, n_samples).rename(
-    #         columns={'mean': 'mean_sil', 'std': 'std_sil'})
 
-    #     df_z_score_5ss =  df_enh_5ss.merge(df_sil_5ss, left_index=True, right_index=True).merge(
-    #         df_radnom_ctrl_5ss, left_index=True, right_index=True).merge(df_ctrl_5ss, left_index=True, right_index=True).merge(
-    #     df_radnom_enh_5ss, left_index=True, right_index=True).merge(df_radnom_sil_5ss, left_index=True, right_index=True)
-
-    #     df_z_score_3ss['z_test_enh'] = (df_z_score_3ss['mean_enh'] - df_z_score_3ss['mean_ctrl']) / (
-    #         df_z_score_3ss['std_enh'].pow(2) / n_exons + df_z_score_3ss['std_ctrl'].pow(2) / n_exons)**(1/2)
-    #     df_z_score_3ss['z_test_sil'] = (df_z_score_3ss['mean_sil'] - df_z_score_3ss['mean_ctrl']) / (
-    #         df_z_score_3ss['std_sil'].pow(2) / n_exons + df_z_score_3ss['std_ctrl'].pow(2) / n_exons)**(1/2)
-    #     df_z_score_5ss['z_test_enh'] = (df_z_score_5ss['mean_enh'] - df_z_score_5ss['mean_ctrl']) / (
-    #         df_z_score_5ss['std_enh'].pow(2) / n_exons + df_z_score_5ss['std_ctrl'].pow(2) / n_exons)**(1/2)
-    #     df_z_score_5ss['z_test_sil'] = (df_z_score_5ss['mean_sil'] - df_z_score_5ss['mean_ctrl']) / (
-    #         df_z_score_5ss['std_sil'].pow(2) / n_exons + df_z_score_5ss['std_ctrl'].pow(2) / n_exons)**(1/2)
-        
-    #     df_z_score_3ss['z_score_enh'] = (df_z_score_3ss.enhanced - df_z_score_3ss['mean_ctrl']) / df_z_score_3ss['std_ctrl']
-    #     df_z_score_3ss['z_score_sil'] = (df_z_score_3ss.silenced - df_z_score_3ss['mean_ctrl']) / df_z_score_3ss['std_ctrl']
-    #     df_z_score_3ss['z_score_ctrl'] = (df_z_score_3ss.control - df_z_score_3ss['mean_ctrl']) / df_z_score_3ss['std_ctrl']
-        
-    #     df_z_score_5ss['z_score_enh'] = (df_z_score_5ss.enhanced - df_z_score_5ss['mean_ctrl']) / df_z_score_5ss['std_ctrl']
-    #     df_z_score_5ss['z_score_sil'] = (df_z_score_5ss.silenced - df_z_score_5ss['mean_ctrl']) / df_z_score_5ss['std_ctrl']
-    #     df_z_score_5ss['z_score_ctrl'] = (df_z_score_5ss.control - df_z_score_5ss['mean_ctrl']) / df_z_score_5ss['std_ctrl']
-        
     
     df_final_3ss['relative_position'] = range(-window, window + 1)
     df_final_3ss = df_final_3ss.set_index('relative_position')
@@ -2159,93 +2145,7 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
         plt.tight_layout()
         fig3.savefig(f'{output_dir}/{name}_downstream.pdf')
     
-    max_b = max(max(enh_3ss_no_xl.values()), max(sil_3ss_no_xl.values()), max(ctrl_3ss_no_xl.values()),
-               max(enhrest_3ss_no_xl.values()), max(silrest_3ss_no_xl.values()), max(const_3ss_no_xl.values()))
-    ctrl_3ss_y, ctrl_3ss_x = np.histogram(np.array(list(ctrl_3ss_no_xl.values())), range=(0, max_b), density=True)
-    enh_3ss_y, enh_3ss_x = np.histogram(np.array(list(enh_3ss_no_xl.values())), range=(0, max_b), density=True)
-    sil_3ss_y, sil_3ss_x = np.histogram(np.array(list(sil_3ss_no_xl.values())), range=(0, max_b), density=True)
-    ctrl_5ss_y, ctrl_5ss_x = np.histogram(np.array(list(ctrl_5ss_no_xl.values())), range=(0, max_b), density=True)
-    enh_5ss_y, enh_5ss_x = np.histogram(np.array(list(enh_5ss_no_xl.values())), range=(0, max_b), density=True)
-    sil_5ss_y, sil_5ss_x = np.histogram(np.array(list(sil_5ss_no_xl.values())), range=(0, max_b), density=True)
-    
-    enhrest_3ss_y, enhrest_3ss_x = np.histogram(np.array(list(enhrest_3ss_no_xl.values())), range=(0, max_b), density=True)
-    silrest_3ss_y, silrest_3ss_x = np.histogram(np.array(list(silrest_3ss_no_xl.values())), range=(0, max_b), density=True)
-    const_3ss_y, const_3ss_x = np.histogram(np.array(list(const_3ss_no_xl.values())), range=(0, max_b), density=True)
-    
-    enhrest_5ss_y, enhrest_5ss_x = np.histogram(np.array(list(enhrest_5ss_no_xl.values())), range=(0, max_b), density=True)
-    silrest_5ss_y, silrest_5ss_x = np.histogram(np.array(list(silrest_5ss_no_xl.values())), range=(0, max_b), density=True)
-    const_5ss_y, const_5ss_x = np.histogram(np.array(list(const_5ss_no_xl.values())), range=(0, max_b), density=True)
-    
-    sns.set(rc={'figure.figsize':(10, 6)})
-    sns.set_style("whitegrid")
-    fig3, ax = plt.subplots()
-    ax.set_xscale('log', basex=10)
-    sns.lineplot(x=ctrl_3ss_x[:-1], y=ctrl_3ss_y, color=colors_dict['ctrl'])
-    sns.lineplot(x=enh_3ss_x[:-1], y=enh_3ss_y, color=colors_dict['enh'])
-    sns.lineplot(x=sil_3ss_x[:-1], y=sil_3ss_y, color=colors_dict['sil'])
-    sns.lineplot(x=enhrest_3ss_x[:-1], y=enhrest_3ss_y, color=colors_dict['enhrest'])
-    sns.lineplot(x=silrest_3ss_x[:-1], y=silrest_3ss_y, color=colors_dict['silrest'])
-    sns.lineplot(x=const_3ss_x[:-1], y=const_3ss_y, color=colors_dict['const'])
-    plt.tight_layout()
-    fig3.savefig(f'{output_dir}/{name}_3ss_coverage_dstribution.pdf')
-    fig4, ax = plt.subplots()
-    ax.set_xscale('log', basex=10)
-    sns.lineplot(x=ctrl_5ss_x[:-1], y=ctrl_5ss_y, color=colors_dict['ctrl'])
-    sns.lineplot(x=enh_5ss_x[:-1], y=enh_5ss_y, color=colors_dict['enh'])
-    sns.lineplot(x=sil_5ss_x[:-1], y=sil_5ss_y, color=colors_dict['sil'])
-    sns.lineplot(x=enhrest_5ss_x[:-1], y=enhrest_5ss_y, color=colors_dict['enhrest'])
-    sns.lineplot(x=silrest_5ss_x[:-1], y=silrest_5ss_y, color=colors_dict['silrest'])
-    sns.lineplot(x=const_5ss_x[:-1], y=const_5ss_y, color=colors_dict['const'])
-    plt.tight_layout()
-    fig4.savefig(f'{output_dir}/{name}_5ss_coverage_dstribution.pdf')
 
-     
-    df_temp_enh = pd.DataFrame.from_dict(enh_no_xl, orient='index')
-    flat_list_enh = [item for sublist in df_temp_enh.values for item in sublist]
-    df_temp_sil = pd.DataFrame.from_dict(sil_no_xl, orient='index')
-    flat_list_sil = [item for sublist in df_temp_sil.values for item in sublist]
-    df_temp_ctrl = pd.DataFrame.from_dict(ctrl_no_xl, orient='index')
-    flat_list_ctrl = [item for sublist in df_temp_ctrl.values for item in sublist]
-    
-    df_temp_enhrest = pd.DataFrame.from_dict(enhrest_no_xl, orient='index')
-    flat_list_enhrest = [item for sublist in df_temp_enhrest.values for item in sublist]
-    df_temp_silrest = pd.DataFrame.from_dict(silrest_no_xl, orient='index')
-    flat_list_silrest = [item for sublist in df_temp_silrest.values for item in sublist]
-    
-    df_temp_const = pd.DataFrame.from_dict(const_no_xl, orient='index')
-    flat_list_const = [item for sublist in df_temp_const.values for item in sublist]
-    
-    df_temp_enh = pd.DataFrame(df_rmats_enh_3ss['score'])
-    df_temp_enh['no_xl'] = flat_list_enh
-    df_temp_enh['class'] = 'enhanced'
-    df_temp_sil = pd.DataFrame(df_rmats_sil_3ss['score'])
-    df_temp_sil['no_xl'] = flat_list_sil
-    df_temp_sil['class'] = 'silenced'
-    df_temp_ctrl = pd.DataFrame(df_rmats_ctrl_3ss['score'])
-    df_temp_ctrl['no_xl'] = flat_list_ctrl
-    df_temp_ctrl['class'] = 'control'
-    
-    df_temp_enhrest = pd.DataFrame(df_rmats_enhrest_3ss['score'])
-    df_temp_enhrest['no_xl'] = flat_list_enhrest
-    df_temp_enhrest['class'] = 'enhanced_rest'
-    df_temp_silrest = pd.DataFrame(df_rmats_silrest_3ss['score'])
-    df_temp_silrest['no_xl'] = flat_list_silrest
-    df_temp_silrest['class'] = 'silenced_rest'
-    df_temp_const = pd.DataFrame(df_rmats_const_3ss['score'])
-    df_temp_const['no_xl'] = flat_list_const
-    df_temp_const['class'] = 'const'
-    df_temp_foreground = pd.concat([df_temp_enh, df_temp_sil, df_temp_ctrl, df_temp_const])
-    df_temp_background = pd.concat([df_temp_enhrest, df_temp_silrest])
-
-    sns.set(rc={'figure.figsize':(20, 6)})
-    sns.set_style("whitegrid")
-    sns.scatterplot(x=df_temp_background['score'], y=df_temp_background['no_xl'], hue=df_temp_background['class'], 
-        palette=[colors_dict['enhrest'], colors_dict['silrest']], alpha=0.8, s=8)
-    sns.scatterplot(x=df_temp_foreground['score'], y=df_temp_foreground['no_xl'], hue=df_temp_foreground['class'], 
-        palette=[colors_dict['enh'], colors_dict['sil'], colors_dict['ctrl'], colors_dict['const']], s=8)
-    plt.tight_layout()
-    plt.savefig(f'{output_dir}/{name}_exon_classes.pdf')
-    pbt.helpers.cleanup()
 
  
 if __name__=='__main__':
