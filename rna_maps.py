@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use('Agg')
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
+from matplotlib.lines import Line2D
 import pandas as pd
 import numpy as np
 import pybedtools as pbt
@@ -83,7 +84,7 @@ def get_ss_bed(df, pos_col, neg_col):
 
     return ss
 
-def get_coverage_plot(xl_bed, df, fai, window, exon_categories):
+def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
     """Return coverage of xl_bed items around df features extended by windows"""
     df = df.loc[df.name != "."]
     xl_bed = pbt.BedTool(xl_bed).sort()
@@ -109,6 +110,8 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories):
     df_plot_ctrl.columns = ["position","control_coverage","control_number_exons"]
     df_plot = df_plot.merge(df_plot_ctrl, how="left")
     df_plot['control_norm_coverage'] = df_plot["control_coverage"] / df_plot["control_number_exons"]
+    # give 0 values a small pseudo-count so that fold change can be calculated
+    df_plot.loc[df_plot['control_norm_coverage'] == 0, ['control_norm_coverage']] = 0.000001
     df_plot['fold_change'] = df_plot["norm_coverage"] / df_plot["control_norm_coverage"]
     
     contingency_table = list(zip(df_plot['coverage'], df_plot['number_exons']-df_plot['coverage'], df_plot['control_coverage'], df_plot['control_number_exons'] - df_plot['control_coverage']))
@@ -116,11 +119,12 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories):
     df_plot['pvalue'] = [ stats.fisher_exact(table)[1] for table in contingency_table ]
 
     df_plot['-log10pvalue'] = np.log10(1/df_plot['pvalue'])
+    df_plot['label'] = label
 
     df_plot.loc[df_plot['fold_change'] < 1, ['-log10pvalue']] = df_plot['-log10pvalue'] * -1
 
-    print(df_plot.head())
-    sys.exit()
+    df_plot['-log10pvalue_smoothed'] = df_plot['-log10pvalue'].rolling(smoothing, center=True, win_type="gaussian").mean(std=2)
+
     return df_plot
         
             
@@ -242,353 +246,143 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ### The coverage plot ###
 
-        middle_3ss, middle_raw_3ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'exonStart_0base','exonEnd'), fai, window, exon_categories)
+        middle_3ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'exonStart_0base','exonEnd'), fai, window, exon_categories, 'middle_3ss')
+        middle_5ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'exonEnd','exonStart_0base'), fai, window, exon_categories, 'middle_5ss')
+        downstream_3ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'downstreamES','downstreamEE'), fai, window, exon_categories, 'downstream_3ss')
+        downstream_5ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'downstreamEE','downstreamES'), fai, window, exon_categories, 'downstream_5ss')
+        upstream_3ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'upstreamES','upstreamEE'), fai, window, exon_categories, 'upstream_3ss')
+        upstream_5ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'upstreamEE','upstreamES'), fai, window, exon_categories, 'upstream_5ss')
 
-        print(middle_3ss)
+
+        plotting_df = pd.concat([middle_3ss, middle_5ss, downstream_3ss, downstream_5ss, upstream_3ss, upstream_5ss])
+
+        sns.set(rc={'figure.figsize':(15, 5)})
+        sns.set_style("whitegrid")
+        g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', 
+                    kind='line', col_wrap=6, 
+                    col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+        titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+        for ax, title in zip(g.axes.flat, titles):
+            ax.set_title(title)
+        g.set(xlabel='')
+        g.axes[0].set_ylabel('-log10(p value) enrichment / control')
+ 
+        ax = g.axes[0]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0.5, -0.3), width=.5, height=.1,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[0]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0, -0.25), width=.5, height=.001,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[1]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0, -0.3), width=.5, height=.1,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[1]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0.5, -0.25), width=.5, height=.001,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[2]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0.5, -0.3), width=.5, height=.1,
+             color="midnightblue", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[2]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0, -0.25), width=.5, height=.001,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[3]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0, -0.3), width=.5, height=.1,
+             color="midnightblue", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[3]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0.5, -0.25), width=.5, height=.001,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[4]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0.5, -0.3), width=.5, height=.1,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[4]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0, -0.25), width=.5, height=.001,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[5]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0, -0.3), width=.5, height=.1,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[5]
+        rect = matplotlib.patches.Rectangle(
+             xy=(0.5, -0.25), width=.5, height=.001,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        plt.tight_layout()
+        plt.subplots_adjust(wspace=0)
+        plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf')
+        pbt.helpers.cleanup()
+
         sys.exit()
 
-        df_enh_3ss = df_enh_3ss.rename(columns={'coverage': 'enhanced'})
-        df_enh_5ss, df_coverage_enh_5ss, df_raw_enh_5ss = get_coverage_plot(xl_bed, df_rmats_enh_5ss[col_bed], fai, window)
-        df_enh_5ss = df_enh_5ss.rename(columns={'coverage': 'enhanced'})
 
-        df_sil_3ss, df_coverage_sil_3ss, df_raw_sil_3ss = get_coverage_plot(xl_bed, df_rmats_sil_3ss[col_bed], fai, window)
-        df_sil_3ss = df_sil_3ss.rename(columns={'coverage': 'silenced'})
-        df_sil_5ss, df_coverage_sil_5ss, df_raw_sil_5ss = get_coverage_plot(xl_bed, df_rmats_sil_5ss[col_bed], fai, window)
-        df_sil_5ss = df_sil_5ss.rename(columns={'coverage': 'silenced'})
-        
-        df_ctrl_3ss, df_coverage_ctrl_3ss, df_raw_ctrl_3ss = get_coverage_plot(xl_bed, df_rmats_ctrl_3ss[col_bed], fai, window)
-        df_ctrl_3ss = df_ctrl_3ss.rename(columns={'coverage': 'control'})
-        df_ctrl_5ss, df_coverage_ctrl_5ss, df_raw_ctrl_5ss = get_coverage_plot(xl_bed, df_rmats_ctrl_5ss[col_bed], fai, window)
-        df_ctrl_5ss = df_ctrl_5ss.rename(columns={'coverage': 'control'})
-        
-        df_const_3ss, df_coverage_const_3ss, df_raw_const_3ss = get_coverage_plot(xl_bed, df_rmats_const_3ss[col_bed], fai, window)
-        df_const_3ss = df_const_3ss.rename(columns={'coverage': 'const'})
-        df_const_5ss, df_coverage_const_5ss, df_raw_const_5ss = get_coverage_plot(xl_bed, df_rmats_const_5ss[col_bed], fai, window)
-        df_const_5ss = df_const_5ss.rename(columns={'coverage': 'const'})
-        df_enhrest_3ss, df_coverage_enhrest_3ss, df_raw_enhrest_3ss = get_coverage_plot(xl_bed, df_rmats_enhrest_3ss[col_bed], fai, window)
-        df_enhrest_3ss = df_enhrest_3ss.rename(columns={'coverage': 'enhanced_rest'})
-        df_enhrest_5ss, df_coverage_enhrest_5ss, df_raw_enhrest_5ss = get_coverage_plot(xl_bed, df_rmats_enhrest_5ss[col_bed], fai, window)
-        df_enhrest_5ss = df_enhrest_5ss.rename(columns={'coverage': 'enhanced_rest'})
-        
-        df_silrest_3ss, df_coverage_silrest_3ss,df_raw_silrest_3ss = get_coverage_plot(xl_bed, df_rmats_silrest_3ss[col_bed], fai, window)
-        df_silrest_3ss = df_silrest_3ss.rename(columns={'coverage': 'silenced_rest'})
-        df_silrest_5ss, df_coverage_silrest_5ss, df_raw_silrest_5ss = get_coverage_plot(xl_bed, df_rmats_silrest_5ss[col_bed], fai, window)
-        df_silrest_5ss = df_silrest_5ss.rename(columns={'coverage': 'silenced_rest'})
-        
-        df_raw_enh_3ss['not_covered'] = len(df_rmats_enh_3ss) - df_raw_enh_3ss.coverage
-        df_raw_enh_5ss['not_covered'] = len(df_rmats_enh_5ss) - df_raw_enh_5ss.coverage
-        df_raw_sil_3ss['not_covered'] = len(df_rmats_sil_3ss) - df_raw_sil_3ss.coverage
-        df_raw_sil_5ss['not_covered'] = len(df_rmats_sil_5ss) - df_raw_sil_5ss.coverage
-        df_raw_ctrl_3ss['not_covered_control'] = len(df_rmats_ctrl_3ss) - df_raw_ctrl_3ss.coverage
-        df_raw_ctrl_5ss['not_covered_control'] = len(df_rmats_ctrl_5ss) - df_raw_ctrl_5ss.coverage
-        df_raw_enhrest_3ss['not_covered'] = len(df_rmats_enhrest_3ss) - df_raw_enhrest_3ss.coverage
-        df_raw_enhrest_5ss['not_covered'] = len(df_rmats_enhrest_5ss) - df_raw_enhrest_5ss.coverage
-        df_raw_silrest_3ss['not_covered'] = len(df_rmats_silrest_3ss) - df_raw_silrest_3ss.coverage
-        df_raw_silrest_5ss['not_covered'] = len(df_rmats_silrest_5ss) - df_raw_silrest_5ss.coverage
-        df_raw_const_3ss['not_covered'] = len(df_rmats_const_3ss) - df_raw_const_3ss.coverage
-        df_raw_const_5ss['not_covered'] = len(df_rmats_const_5ss) - df_raw_const_5ss.coverage
+
     
+
     
-    df_raw_ctrl_3ss = df_raw_ctrl_3ss.rename(columns={'coverage': 'control'})
-    df_raw_ctrl_5ss = df_raw_ctrl_5ss.rename(columns={'coverage': 'control'})
+ 
     
-    df_raw_enh_3ss = df_raw_enh_3ss.join(df_raw_ctrl_3ss)
-    df_raw_enh_5ss = df_raw_enh_5ss.join(df_raw_ctrl_5ss)
-    df_raw_sil_3ss = df_raw_sil_3ss.join(df_raw_ctrl_3ss)
-    df_raw_sil_5ss = df_raw_sil_5ss.join(df_raw_ctrl_5ss)
-    df_raw_enhrest_3ss = df_raw_enhrest_3ss.join(df_raw_ctrl_3ss)
-    df_raw_enhrest_5ss = df_raw_enhrest_5ss.join(df_raw_ctrl_5ss)
-    df_raw_silrest_3ss = df_raw_silrest_3ss.join(df_raw_ctrl_3ss)
-    df_raw_silrest_5ss = df_raw_silrest_5ss.join(df_raw_ctrl_5ss)
-    df_raw_const_3ss = df_raw_const_3ss.join(df_raw_ctrl_3ss)
-    df_raw_const_5ss = df_raw_const_5ss.join(df_raw_ctrl_5ss)
-       
-    contingency_tables_enh_3ss = {}
-    for index, row in df_raw_enh_3ss.iterrows():
-        contingency_tables_enh_3ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-    contingency_tables_enh_5ss = {}
-    for index, row in df_raw_enh_5ss.iterrows():
-        contingency_tables_enh_5ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-    contingency_tables_sil_3ss = {}
-    for index, row in df_raw_sil_3ss.iterrows():
-        contingency_tables_sil_3ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-    contingency_tables_sil_5ss = {}
-    for index, row in df_raw_sil_5ss.iterrows():
-        contingency_tables_sil_5ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]      
-    contingency_tables_enhrest_3ss = {}
-    for index, row in df_raw_enhrest_3ss.iterrows():
-        contingency_tables_enhrest_3ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-    contingency_tables_enhrest_5ss = {}
-    for index, row in df_raw_enhrest_5ss.iterrows():
-        contingency_tables_enhrest_5ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-    contingency_tables_silrest_3ss = {}
-    for index, row in df_raw_silrest_3ss.iterrows():
-        contingency_tables_silrest_3ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-    contingency_tables_silrest_5ss = {}
-    for index, row in df_raw_silrest_5ss.iterrows():
-        contingency_tables_silrest_5ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-    contingency_tables_const_3ss = {}
-    for index, row in df_raw_const_3ss.iterrows():
-        contingency_tables_const_3ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-    contingency_tables_const_5ss = {}
-    for index, row in df_raw_const_5ss.iterrows():
-        contingency_tables_const_5ss[index] = [[row['coverage'], row['not_covered']], 
-                                              [row['control'], row['not_covered_control']]]
-        
-    fisher_result_enh_3ss = {}
-    for k, v in contingency_tables_enh_3ss.items():
-        fisher_result_enh_3ss[k] = stats.fisher_exact(v)
-    fisher_result_enh_5ss = {}
-    for k, v in contingency_tables_enh_5ss.items():
-        fisher_result_enh_5ss[k] = stats.fisher_exact(v)
-    fisher_result_sil_3ss = {}
-    for k, v in contingency_tables_sil_3ss.items():
-        fisher_result_sil_3ss[k] = stats.fisher_exact(v)
-    fisher_result_sil_5ss = {}
-    for k, v in contingency_tables_sil_5ss.items():
-        fisher_result_sil_5ss[k] = stats.fisher_exact(v)
-    fisher_result_enhrest_3ss = {}
-    for k, v in contingency_tables_enhrest_3ss.items():
-        fisher_result_enhrest_3ss[k] = stats.fisher_exact(v)
-    fisher_result_enhrest_5ss = {}
-    for k, v in contingency_tables_enhrest_5ss.items():
-        fisher_result_enhrest_5ss[k] = stats.fisher_exact(v)
-    fisher_result_silrest_3ss = {}
-    for k, v in contingency_tables_silrest_3ss.items():
-        fisher_result_silrest_3ss[k] = stats.fisher_exact(v)
-    fisher_result_silrest_5ss = {}
-    for k, v in contingency_tables_silrest_5ss.items():
-        fisher_result_silrest_5ss[k] = stats.fisher_exact(v)
-    fisher_result_const_3ss = {}
-    for k, v in contingency_tables_const_3ss.items():
-        fisher_result_const_3ss[k] = stats.fisher_exact(v)
-    fisher_result_const_5ss = {}
-    for k, v in contingency_tables_const_5ss.items():
-        fisher_result_const_5ss[k] = stats.fisher_exact(v)
-    p_values_fisher_result_enh_3ss = {}
-    for k, v in fisher_result_enh_3ss.items():
-        p_values_fisher_result_enh_3ss[k] = v[1]
-    p_values_fisher_result_enh_5ss = {}
-    for k, v in fisher_result_enh_5ss.items():
-        p_values_fisher_result_enh_5ss[k] = v[1]
-    p_values_fisher_result_sil_3ss = {}
-    for k, v in fisher_result_sil_3ss.items():
-        p_values_fisher_result_sil_3ss[k] = v[1]
-    p_values_fisher_result_sil_5ss = {}
-    for k, v in fisher_result_sil_5ss.items():
-        p_values_fisher_result_sil_5ss[k] = v[1]
-    p_values_fisher_result_enhrest_3ss = {}
-    for k, v in fisher_result_enhrest_3ss.items():
-        p_values_fisher_result_enhrest_3ss[k] = v[1]
-    p_values_fisher_result_enhrest_5ss = {}
-    for k, v in fisher_result_enhrest_5ss.items():
-        p_values_fisher_result_enhrest_5ss[k] = v[1]
-    p_values_fisher_result_silrest_3ss = {}
-    for k, v in fisher_result_silrest_3ss.items():
-        p_values_fisher_result_silrest_3ss[k] = v[1]
-    p_values_fisher_result_silrest_5ss = {}
-    for k, v in fisher_result_silrest_5ss.items():
-        p_values_fisher_result_silrest_5ss[k] = v[1]
-    p_values_fisher_result_const_3ss = {}
-    for k, v in fisher_result_const_3ss.items():
-        p_values_fisher_result_const_3ss[k] = v[1]
-    p_values_fisher_result_const_5ss = {}
-    for k, v in fisher_result_const_5ss.items():
-        p_values_fisher_result_const_5ss[k] = v[1]
-        
-    df_fisher_3ss_enh = pd.DataFrame.from_dict(
-        p_values_fisher_result_enh_3ss, orient='index', columns=['pval_enh'])
-    df_fisher_3ss_sil = pd.DataFrame.from_dict(
-        p_values_fisher_result_sil_3ss, orient='index', columns=['pval_sil'])
-    df_fisher_5ss_enh = pd.DataFrame.from_dict(
-        p_values_fisher_result_enh_5ss, orient='index', columns=['pval_enh'])
-    df_fisher_5ss_sil = pd.DataFrame.from_dict(
-        p_values_fisher_result_sil_5ss, orient='index', columns=['pval_sil'])
-    df_fisher_3ss_enhrest = pd.DataFrame.from_dict(
-        p_values_fisher_result_enhrest_3ss, orient='index', columns=['pval_enhrest'])
-    df_fisher_3ss_silrest = pd.DataFrame.from_dict(
-        p_values_fisher_result_silrest_3ss, orient='index', columns=['pval_silrest'])
-    df_fisher_3ss_const = pd.DataFrame.from_dict(
-        p_values_fisher_result_const_3ss, orient='index', columns=['pval_const'])
-    df_fisher_5ss_enhrest = pd.DataFrame.from_dict(
-        p_values_fisher_result_enhrest_5ss, orient='index', columns=['pval_enhrest'])
-    df_fisher_5ss_silrest = pd.DataFrame.from_dict(
-        p_values_fisher_result_silrest_5ss, orient='index', columns=['pval_silrest'])
-    df_fisher_5ss_const = pd.DataFrame.from_dict(
-        p_values_fisher_result_const_5ss, orient='index', columns=['pval_const'])
+
     
-    df_fisher_3ss = df_fisher_3ss_enh.join([
-        df_fisher_3ss_sil, df_enh_3ss, df_sil_3ss, df_ctrl_3ss,
-        df_fisher_3ss_enhrest, df_fisher_3ss_silrest, df_fisher_3ss_const,
-        df_enhrest_3ss, df_silrest_3ss, df_const_3ss])
-    df_fisher_5ss = df_fisher_5ss_enh.join([
-        df_fisher_5ss_sil, df_enh_5ss, df_sil_5ss, df_ctrl_5ss,
-        df_fisher_5ss_enhrest, df_fisher_5ss_silrest, df_fisher_5ss_const,
-        df_enhrest_5ss, df_silrest_5ss, df_const_5ss])
+
     
-    df_fisher_3ss['enh_fold_change'] = df_fisher_3ss.enhanced / df_fisher_3ss.control
-    df_fisher_3ss['sil_fold_change'] = df_fisher_3ss.silenced / df_fisher_3ss.control
-    df_fisher_5ss['enh_fold_change'] = df_fisher_5ss.enhanced / df_fisher_5ss.control
-    df_fisher_5ss['sil_fold_change'] = df_fisher_5ss.silenced / df_fisher_5ss.control    
-    df_fisher_3ss['enhrest_fold_change'] = df_fisher_3ss.enhanced_rest / df_fisher_3ss.control
-    df_fisher_3ss['silrest_fold_change'] = df_fisher_3ss.silenced_rest / df_fisher_3ss.control
-    df_fisher_3ss['const_fold_change'] = df_fisher_3ss.const / df_fisher_3ss.control
-    df_fisher_5ss['enhrest_fold_change'] = df_fisher_5ss.enhanced_rest / df_fisher_5ss.control
-    df_fisher_5ss['silrest_fold_change'] = df_fisher_5ss.silenced_rest / df_fisher_5ss.control
-    df_fisher_5ss['const_fold_change'] = df_fisher_5ss.const / df_fisher_5ss.control
-    
-    df_fisher_3ss['-log(pval)_enh'] = -np.log(df_fisher_3ss.pval_enh)
-    df_fisher_3ss['-log(pval)_sil'] = -np.log(df_fisher_3ss.pval_sil)
-    df_fisher_5ss['-log(pval)_enh'] = -np.log(df_fisher_5ss.pval_enh)
-    df_fisher_5ss['-log(pval)_sil'] = -np.log(df_fisher_5ss.pval_sil)    
-    df_fisher_3ss['-log(pval)_enhrest'] = -np.log(df_fisher_3ss.pval_enhrest)
-    df_fisher_3ss['-log(pval)_silrest'] = -np.log(df_fisher_3ss.pval_silrest)
-    df_fisher_3ss['-log(pval)_const'] = -np.log(df_fisher_3ss.pval_const)
-    df_fisher_5ss['-log(pval)_enhrest'] = -np.log(df_fisher_5ss.pval_enhrest)
-    df_fisher_5ss['-log(pval)_silrest'] = -np.log(df_fisher_5ss.pval_silrest)
-    df_fisher_5ss['-log(pval)_const'] = -np.log(df_fisher_5ss.pval_const)
-    
-    df_fisher_3ss['-log(pval)_enh_forplot'] = np.nan
-    df_fisher_3ss['-log(pval)_sil_forplot'] = np.nan
-    df_fisher_3ss['-log(pval)_enhrest_forplot'] = np.nan
-    df_fisher_3ss['-log(pval)_silrest_forplot'] = np.nan
-    df_fisher_3ss['-log(pval)_const_forplot'] = np.nan
-    for index, row in df_fisher_3ss.iterrows():
-        if row['enh_fold_change'] > 1:
-            df_fisher_3ss.loc[index, '-log(pval)_enh_forplot'] = row['-log(pval)_enh']
-        else:
-            df_fisher_3ss.loc[index, '-log(pval)_enh_forplot'] = -row['-log(pval)_enh']
-        if row['sil_fold_change'] > 1:
-            df_fisher_3ss.loc[index, '-log(pval)_sil_forplot'] = row['-log(pval)_sil']
-        else:
-            df_fisher_3ss.loc[index, '-log(pval)_sil_forplot'] = -row['-log(pval)_sil']
-        if row['enhrest_fold_change'] > 1:
-            df_fisher_3ss.loc[index, '-log(pval)_enhrest_forplot'] = row['-log(pval)_enhrest']
-        else:
-            df_fisher_3ss.loc[index, '-log(pval)_enhrest_forplot'] = -row['-log(pval)_enhrest']
-        if row['silrest_fold_change'] > 1:
-            df_fisher_3ss.loc[index, '-log(pval)_silrest_forplot'] = row['-log(pval)_silrest']
-        else:
-            df_fisher_3ss.loc[index, '-log(pval)_silrest_forplot'] = -row['-log(pval)_silrest']
-        if row['const_fold_change'] > 1:
-            df_fisher_3ss.loc[index, '-log(pval)_const_forplot'] = row['-log(pval)_const']
-        else:
-            df_fisher_3ss.loc[index, '-log(pval)_const_forplot'] = -row['-log(pval)_const']
-    
-    df_fisher_5ss['-log(pval)_enh_forplot'] = np.nan
-    df_fisher_5ss['-log(pval)_sil_forplot'] = np.nan
-    df_fisher_5ss['-log(pval)_enhrest_forplot'] = np.nan
-    df_fisher_5ss['-log(pval)_silrest_forplot'] = np.nan
-    df_fisher_5ss['-log(pval)_const_forplot'] = np.nan
-    for index, row in df_fisher_5ss.iterrows():
-        if row['enh_fold_change'] > 1:
-            df_fisher_5ss.loc[index, '-log(pval)_enh_forplot'] = row['-log(pval)_enh']
-        else:
-            df_fisher_5ss.loc[index, '-log(pval)_enh_forplot'] = -row['-log(pval)_enh']
-        if row['sil_fold_change'] > 1:
-            df_fisher_5ss.loc[index, '-log(pval)_sil_forplot'] = row['-log(pval)_sil']
-        else:
-            df_fisher_5ss.loc[index, '-log(pval)_sil_forplot'] = -row['-log(pval)_sil']
-        if row['enhrest_fold_change'] > 1:
-            df_fisher_5ss.loc[index, '-log(pval)_enhrest_forplot'] = row['-log(pval)_enhrest']
-        else:
-            df_fisher_5ss.loc[index, '-log(pval)_enhrest_forplot'] = -row['-log(pval)_enhrest']
-        if row['silrest_fold_change'] > 1:
-            df_fisher_5ss.loc[index, '-log(pval)_silrest_forplot'] = row['-log(pval)_silrest']
-        else:
-            df_fisher_5ss.loc[index, '-log(pval)_silrest_forplot'] = -row['-log(pval)_silrest']
-        if row['const_fold_change'] > 1:
-            df_fisher_5ss.loc[index, '-log(pval)_const_forplot'] = row['-log(pval)_const']
-        else:
-            df_fisher_5ss.loc[index, '-log(pval)_const_forplot'] = -row['-log(pval)_const']
-    
-    df_fisher_3ss['enh_smooth'] = df_fisher_3ss['-log(pval)_enh_forplot'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_3ss['enh_max'] = df_fisher_3ss['-log(pval)_enh_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_3ss['enh_min'] = df_fisher_3ss['-log(pval)_enh_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    df_fisher_5ss['enh_smooth'] = df_fisher_5ss['-log(pval)_enh_forplot'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_5ss['enh_max'] = df_fisher_5ss['-log(pval)_enh_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_5ss['enh_min'] = df_fisher_5ss['-log(pval)_enh_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    
-    df_fisher_3ss['enhrest_smooth'] = df_fisher_3ss['-log(pval)_enhrest_forplot'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_3ss['enhrest_max'] = df_fisher_3ss['-log(pval)_enhrest_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_3ss['enhrest_min'] = df_fisher_3ss['-log(pval)_enhrest_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    df_fisher_5ss['enhrest_smooth'] = df_fisher_5ss['-log(pval)_enhrest_forplot'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_5ss['enhrest_max'] = df_fisher_5ss['-log(pval)_enhrest_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_5ss['enhrest_min'] = df_fisher_5ss['-log(pval)_enhrest_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    
-    df_fisher_3ss['sil_smooth'] = df_fisher_3ss['-log(pval)_sil_forplot'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_3ss['sil_max'] = df_fisher_3ss['-log(pval)_sil_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_3ss['sil_min'] = df_fisher_3ss['-log(pval)_sil_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    df_fisher_5ss['sil_smooth'] = df_fisher_5ss['-log(pval)_sil_forplot'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_5ss['sil_max'] = df_fisher_5ss['-log(pval)_sil_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_5ss['sil_min'] = df_fisher_5ss['-log(pval)_sil_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    
-    df_fisher_3ss['silrest_smooth'] = df_fisher_3ss['-log(pval)_silrest_forplot'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_3ss['silrest_max'] = df_fisher_3ss['-log(pval)_silrest_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_3ss['silrest_min'] = df_fisher_3ss['-log(pval)_silrest_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    df_fisher_5ss['silrest_smooth'] = df_fisher_5ss['-log(pval)_silrest_forplot'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_5ss['silrest_max'] = df_fisher_5ss['-log(pval)_silrest_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_5ss['silrest_min'] = df_fisher_5ss['-log(pval)_silrest_forplot'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    
-    df_fisher_3ss['enh_smooth_real'] = df_fisher_3ss['-log(pval)_enh'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_3ss['enh_max_real'] = df_fisher_3ss['-log(pval)_enh'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_3ss['enh_min_real'] = df_fisher_3ss['-log(pval)_enh'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    df_fisher_5ss['enh_smooth_real'] = df_fisher_5ss['-log(pval)_enh'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_5ss['enh_max_real'] = df_fisher_5ss['-log(pval)_enh'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_5ss['enh_min_real'] = df_fisher_5ss['-log(pval)_enh'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    
-    
-    df_fisher_3ss['enhrest_smooth_real'] = df_fisher_3ss['-log(pval)_enhrest'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_3ss['enhrest_max_real'] = df_fisher_3ss['-log(pval)_enhrest'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_3ss['enhrest_min_real'] = df_fisher_3ss['-log(pval)_enhrest'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
-    df_fisher_5ss['enhrest_smooth_real'] = df_fisher_5ss['-log(pval)_enhrest'].rolling(
-        smoothing, center=True, win_type="gaussian").mean(std=2)
-    df_fisher_5ss['enhrest_max_real'] = df_fisher_5ss['-log(pval)_enhrest'].rolling(
-        smoothing, center=True).apply(lambda x: np.max(x), raw=False)
-    df_fisher_5ss['enhrest_min_real'] = df_fisher_5ss['-log(pval)_enhrest'].rolling(
-        smoothing, center=True).apply(lambda x: np.min(x), raw=False)
+
+
     
     df_fisher_3ss['sil_smooth_real'] = df_fisher_3ss['-log(pval)_sil'].rolling(
         smoothing, center=True, win_type="gaussian").mean(std=2)
