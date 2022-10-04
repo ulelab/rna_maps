@@ -1,4 +1,5 @@
 import matplotlib
+import matplotlib.ticker as mticker
 matplotlib.use('Agg')
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
@@ -258,7 +259,7 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         sns.set(rc={'figure.figsize':(15, 5)})
         sns.set_style("whitegrid")
-        g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', 
+        g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', facet_kws={"sharex":False},
                     kind='line', col_wrap=6, 
                     col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
         titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
@@ -267,9 +268,19 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
         g.set(xlabel='')
         g.axes[0].set_ylabel('-log10(p value) enrichment / control')
  
+
+        ### Add exon-intron drawing below line plots ###
+        # for calculating rectangle size
+        rect_fraction = 1 / ((window + 50) / 50)
+
         ax = g.axes[0]
+        ax.set_xlim([0, window+50])
+        a=ax.get_xticks().tolist()
+        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+        a = np.arange(0-window, 51, 50)
+        ax.set_xticklabels(a)
         rect = matplotlib.patches.Rectangle(
-             xy=(0.5, -0.3), width=.5, height=.1,
+             xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
              color="slategrey", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
@@ -277,7 +288,20 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[0]
         rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.25), width=.5, height=.001,
+             xy=(0, -0.25), width=1 - rect_fraction, height=.001,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[1]
+        ax.set_xlim([0, window+50])
+        a=ax.get_xticks().tolist()
+        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+        a = np.arange(-50,window + 1, 50)
+        ax.set_xticklabels(a)
+        rect = matplotlib.patches.Rectangle(
+             xy=(0, -0.3), width=rect_fraction, height=.1,
              color="slategrey", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
@@ -285,23 +309,16 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[1]
         rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.3), width=.5, height=.1,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
-
-        ax = g.axes[1]
-        rect = matplotlib.patches.Rectangle(
-             xy=(0.5, -0.25), width=.5, height=.001,
+             xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
              color="slategrey", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
         ax.add_artist(rect)
 
         ax = g.axes[2]
+        ax.set_xlim([0, window+50])
         rect = matplotlib.patches.Rectangle(
-             xy=(0.5, -0.3), width=.5, height=.1,
+             xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
              color="midnightblue", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
@@ -309,15 +326,16 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[2]
         rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.25), width=.5, height=.001,
+             xy=(0, -0.25), width=1 - rect_fraction, height=.001,
              color="slategrey", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
         ax.add_artist(rect)
 
         ax = g.axes[3]
+        ax.set_xlim([0, window+50])
         rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.3), width=.5, height=.1,
+             xy=(0, -0.3), width=rect_fraction, height=.1,
              color="midnightblue", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
@@ -325,7 +343,16 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[3]
         rect = matplotlib.patches.Rectangle(
-             xy=(0.5, -0.25), width=.5, height=.001,
+             xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
+             color="slategrey", alpha=1,
+             transform=ax.transAxes, clip_on=False,
+            )
+        ax.add_artist(rect)
+
+        ax = g.axes[4]
+        ax.set_xlim([0, window+50])
+        rect = matplotlib.patches.Rectangle(
+             xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
              color="slategrey", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
@@ -333,15 +360,16 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[4]
         rect = matplotlib.patches.Rectangle(
-             xy=(0.5, -0.3), width=.5, height=.1,
+             xy=(0, -0.25), width=1 - rect_fraction, height=.001,
              color="slategrey", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
         ax.add_artist(rect)
 
-        ax = g.axes[4]
+        ax = g.axes[5]
+        ax.set_xlim([0, window+50])
         rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.25), width=.5, height=.001,
+             xy=(0, -0.3), width=rect_fraction, height=.1,
              color="slategrey", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
@@ -349,22 +377,14 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[5]
         rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.3), width=.5, height=.1,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
-
-        ax = g.axes[5]
-        rect = matplotlib.patches.Rectangle(
-             xy=(0.5, -0.25), width=.5, height=.001,
+             xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
              color="slategrey", alpha=1,
              transform=ax.transAxes, clip_on=False,
             )
         ax.add_artist(rect)
 
         plt.tight_layout()
-        plt.subplots_adjust(wspace=0)
+        plt.subplots_adjust(wspace=0.01)
         plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf')
         pbt.helpers.cleanup()
 
