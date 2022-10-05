@@ -13,6 +13,8 @@ import scipy.stats as stats
 import sys
 import os
 import argparse
+import random
+import string
 
 sns.set_style("whitegrid")
 colors_dict = {'all': '#D3D3D3', 'ctrl': '#408F76', 'enh': '#F30C08', 'sil': '#005299', 'enhrest': '#FFB122', 'silrest': '#6DC2F5', 'const': '#666666'}
@@ -27,7 +29,9 @@ def cli():
                         help='quantification of differential splicing produced by rMATS')
     required.add_argument('-x',"--inputxlsites", type=str, required=True,
                         help='CLIP crosslinks in BED file format')
-    required.add_argument('-f',"--fastaindex", type=str, required=True,
+    required.add_argument('-f',"--genomefasta", type=str, required=True,
+                        help='genome fasta file (.fa)')
+    required.add_argument('-fi',"--fastaindex", type=str, required=True,
                         help='genome fasta index file (.fai)')
     optional.add_argument('-o',"--outputpath", type=str, default=os.getcwd(), nargs='?',
                         help='output folder [DEFAULT current directory]')
@@ -54,6 +58,7 @@ def cli():
     return(
         args.inputsplice,
         args.inputxlsites,
+        args.genomefasta,
         args.fastaindex,
         args.outputpath,
         args.window,
@@ -128,7 +133,30 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
 
     return df_plot
         
-            
+
+def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, type):
+    """Return multivalency cores around df features extended by windows"""
+    df = df.loc[(df.name != ".") & (pd.notnull(df.name)) & (df.name != "None")]
+    df = df[['chr', 'start', 'end', 'name', 'score', 'strand']]
+    df['name'] = df['name'].apply(lambda x: (str(x) + "XX" + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase))))
+    pbt_df = pbt.BedTool.from_dataframe(df[['chr', 'start', 'end', 'name', 'score', 'strand']]).sort().slop(l=2*window, r=2*window, s=True, g=fai)
+    pbt_df.sequence(fi=genome_fasta,name=True).save_seqs(f'{output_dir}/{name}_temp.fa')
+    print("Running germs to calculate multivalency scores...")
+
+    os.system("RScript --vanilla germs/germs.R -f " + f'{output_dir}/{name}_temp.fa' + " -w 100 -s 20")
+    os.system("gunzip *multivalency.tsv.gz")
+    mdf = pd.read_csv(f'{output_dir}/{name}_temp_5_101_21.multivalency.tsv', sep='\t', header=0)
+    os.system(f'rm {output_dir}/{name}_temp_5_101_21.multivalency.tsv')
+    os.system(f'rm {output_dir}/{name}_temp.fa')
+    mdf['position'] = np.tile(np.arange(0, 4*window - 3), len(df))
+
+    mdf[['label','roname']] = mdf['sequence_name'].str.split('XX',expand=True)
+    mdf = mdf.groupby(['label','position'], as_index=False).agg({'smoothed_kmer_multivalency':'mean'})
+    mdf['type'] = type
+
+    mdf = mdf.loc[(mdf.label != ".") & (pd.notnull(mdf.label)) & (mdf.label != "None")]
+    return mdf
+
 def get_exon_dist(len_df_in, df_coverage, window):
     p = 2 * window + 1
     no_xl_per_exon = {}
@@ -162,7 +190,7 @@ def get_3ss5ss_exons(df_exons):
 
 
 
-def run_rna_map(de_file, xl_bed, fai, window, smoothing, 
+def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
         min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir,
        #n_exons = 150, n_samples = 300, z_test=False
        ):
@@ -247,20 +275,27 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ### The coverage plot ###
 
-        middle_3ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'exonStart_0base','exonEnd'), fai, window, exon_categories, 'middle_3ss')
-        middle_5ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'exonEnd','exonStart_0base'), fai, window, exon_categories, 'middle_5ss')
-        downstream_3ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'downstreamES','downstreamEE'), fai, window, exon_categories, 'downstream_3ss')
-        downstream_5ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'downstreamEE','downstreamES'), fai, window, exon_categories, 'downstream_5ss')
-        upstream_3ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'upstreamES','upstreamEE'), fai, window, exon_categories, 'upstream_3ss')
-        upstream_5ss = get_coverage_plot(xl_bed, get_ss_bed(df_rmats,'upstreamEE','upstreamES'), fai, window, exon_categories, 'upstream_5ss')
+        middle_3ss_bed = get_ss_bed(df_rmats,'exonStart_0base','exonEnd')
+        middle_5ss_bed = get_ss_bed(df_rmats,'exonEnd','exonStart_0base')
+        downstream_3ss_bed = get_ss_bed(df_rmats,'downstreamES','downstreamEE')
+        downstream_5ss_bed = get_ss_bed(df_rmats,'downstreamEE','downstreamES')
+        upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','upstreamEE')
+        upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','upstreamES')
+
+        middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
+        middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss')
+        downstream_3ss = get_coverage_plot(xl_bed, downstream_3ss_bed, fai, window, exon_categories, 'downstream_3ss')
+        downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss')
+        upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
+        upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss')
 
 
         plotting_df = pd.concat([middle_3ss, middle_5ss, downstream_3ss, downstream_5ss, upstream_3ss, upstream_5ss])
 
-        sns.set(rc={'figure.figsize':(15, 5)})
+        #sns.set(rc={'figure.figsize':(7, 5)})
         sns.set_style("whitegrid")
         g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', facet_kws={"sharex":False},
-                    kind='line', col_wrap=6, 
+                    kind='line', col_wrap=6, height=5, aspect=4/5,
                     col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
         titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
         for ax, title in zip(g.axes.flat, titles):
@@ -317,6 +352,10 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[2]
         ax.set_xlim([0, window+50])
+        a=ax.get_xticks().tolist()
+        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+        a = np.arange(0-window, 51, 50)
+        ax.set_xticklabels(a)
         rect = matplotlib.patches.Rectangle(
              xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
              color="midnightblue", alpha=1,
@@ -334,6 +373,10 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[3]
         ax.set_xlim([0, window+50])
+        a=ax.get_xticks().tolist()
+        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+        a = np.arange(-50,window + 1, 50)
+        ax.set_xticklabels(a)
         rect = matplotlib.patches.Rectangle(
              xy=(0, -0.3), width=rect_fraction, height=.1,
              color="midnightblue", alpha=1,
@@ -351,6 +394,10 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[4]
         ax.set_xlim([0, window+50])
+        a=ax.get_xticks().tolist()
+        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+        a = np.arange(0-window, 51, 50)
+        ax.set_xticklabels(a)
         rect = matplotlib.patches.Rectangle(
              xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
              color="slategrey", alpha=1,
@@ -368,6 +415,10 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
 
         ax = g.axes[5]
         ax.set_xlim([0, window+50])
+        a=ax.get_xticks().tolist()
+        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+        a = np.arange(-50,window + 1, 50)
+        ax.set_xticklabels(a)
         rect = matplotlib.patches.Rectangle(
              xy=(0, -0.3), width=rect_fraction, height=.1,
              color="slategrey", alpha=1,
@@ -388,6 +439,43 @@ def run_rna_map(de_file, xl_bed, fai, window, smoothing,
         plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf')
         pbt.helpers.cleanup()
 
+
+        ### Get multivalency scores ###
+        middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss')
+        middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss')
+        downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss')
+        downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss')
+        upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss')
+        upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss')
+
+        plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
+
+        plt.figure()
+        sns.set_style("whitegrid")
+        g = sns.relplot(data=plotting_df, x='position', y='smoothed_kmer_multivalency', hue='label', col='type', facet_kws={"sharex":False},
+                    kind='line', col_wrap=6, height=5, aspect=3.5/5,
+                    col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+        titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+        for ax, title in zip(g.axes.flat, titles):
+            ax.set_title(title)
+        g.set(xlabel='')
+        g.axes[0].set_ylabel('mean smoothed kmer multivalency')
+        ax = g.axes[0]
+        ax.set_xlim([window, (2*window)+50])
+        ax.set_ylim([1.4, 2])
+        ax = g.axes[1]
+        ax.set_xlim([(2*window)-50, 3*window])
+        ax = g.axes[2]
+        ax.set_xlim([window, (2*window)+50])
+        ax = g.axes[3]
+        ax.set_xlim([(2*window)-50, 3*window])
+        ax = g.axes[4]
+        ax.set_xlim([window, (2*window)+50])
+        ax = g.axes[5]
+        ax.set_xlim([(2*window)-50, 3*window])
+        plt.tight_layout()
+        plt.savefig(f'{output_dir}/{name}_RNAmap_multivalency.pdf')
+        pbt.helpers.cleanup()
         sys.exit()
 
 
@@ -1966,6 +2054,7 @@ if __name__=='__main__':
     (
         de_file,
         xl_bed,
+        genome_fasta,
         fai,
         output_folder,
         window,
@@ -1978,6 +2067,6 @@ if __name__=='__main__':
         min_sil
     ) = cli()
     
-    run_rna_map(de_file, xl_bed, fai, window, smoothing, 
+    run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
         min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder)
 
