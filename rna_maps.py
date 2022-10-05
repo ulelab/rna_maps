@@ -51,6 +51,9 @@ def cli():
                         help='maximum inclusion for exons to be considered enhanced [DEFAULT -0.05]')
     optional.add_argument('-ms',"--minsil", type=float, default=0.05, nargs='?',
                         help='minimum inclusion for exons to be considered silenced [DEFAULT 0.05]')
+    optional.add_argument('-v','--multivalency', action="store_true")
+    optional.add_argument('-g',"--germsdir", type=str, default=os.getcwd(), nargs='?',
+                        help='directory for where to find germs.R for multivalency analysis eg. /Users/Bellinda/repos/germs [DEFAULT current directory]')
     parser._action_groups.append(optional)
     args = parser.parse_args()
     print(args)
@@ -68,7 +71,9 @@ def cli():
         args.maxincl,
         args.maxfdr,
         args.maxenh,
-        args.minsil
+        args.minsil,
+        args.multivalency,
+        args.germsdir
         )
 
 def df_apply(col_fn, *col_names):
@@ -134,7 +139,7 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
     return df_plot
         
 
-def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, type):
+def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, type, germsdir):
     """Return multivalency cores around df features extended by windows"""
     df = df.loc[(df.name != ".") & (pd.notnull(df.name)) & (df.name != "None")]
     df = df[['chr', 'start', 'end', 'name', 'score', 'strand']]
@@ -143,7 +148,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     pbt_df.sequence(fi=genome_fasta,name=True).save_seqs(f'{output_dir}/{name}_temp.fa')
     print("Running germs to calculate multivalency scores...")
 
-    os.system("RScript --vanilla germs/germs.R -f " + f'{output_dir}/{name}_temp.fa' + " -w 100 -s 20")
+    os.system("RScript --vanilla " + germsdir + "/germs.R -f " + f'{output_dir}/{name}_temp.fa' + " -w 100 -s 20")
     os.system("gunzip *multivalency.tsv.gz")
     mdf = pd.read_csv(f'{output_dir}/{name}_temp_5_101_21.multivalency.tsv', sep='\t', header=0)
     os.system(f'rm {output_dir}/{name}_temp_5_101_21.multivalency.tsv')
@@ -158,7 +163,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     return mdf
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir,
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir
        #n_exons = 150, n_samples = 300, z_test=False
        ):
     name = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
@@ -406,43 +411,43 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf')
         pbt.helpers.cleanup()
 
+        if multivalency:
+            ### Get multivalency scores ###
+            middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss',germsdir)
+            middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss',germsdir)
+            downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss',germsdir)
+            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss',germsdir)
+            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss',germsdir)
+            upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss',germsdir)
 
-        ### Get multivalency scores ###
-        middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss')
-        middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss')
-        downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss')
-        downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss')
-        upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss')
-        upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss')
+            plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
 
-        plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
-
-        plt.figure()
-        sns.set_style("whitegrid")
-        g = sns.relplot(data=plotting_df, x='position', y='smoothed_kmer_multivalency', hue='label', col='type', facet_kws={"sharex":False},
-                    kind='line', col_wrap=6, height=5, aspect=3.5/5,
-                    col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
-        titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
-        for ax, title in zip(g.axes.flat, titles):
-            ax.set_title(title)
-        g.set(xlabel='')
-        g.axes[0].set_ylabel('mean smoothed kmer multivalency')
-        ax = g.axes[0]
-        ax.set_xlim([window, (2*window)+50])
-        ax.set_ylim([1.4, 2])
-        ax = g.axes[1]
-        ax.set_xlim([(2*window)-50, 3*window])
-        ax = g.axes[2]
-        ax.set_xlim([window, (2*window)+50])
-        ax = g.axes[3]
-        ax.set_xlim([(2*window)-50, 3*window])
-        ax = g.axes[4]
-        ax.set_xlim([window, (2*window)+50])
-        ax = g.axes[5]
-        ax.set_xlim([(2*window)-50, 3*window])
-        plt.tight_layout()
-        plt.savefig(f'{output_dir}/{name}_RNAmap_multivalency.pdf')
-        pbt.helpers.cleanup()
+            plt.figure()
+            sns.set_style("whitegrid")
+            g = sns.relplot(data=plotting_df, x='position', y='smoothed_kmer_multivalency', hue='label', col='type', facet_kws={"sharex":False},
+                        kind='line', col_wrap=6, height=5, aspect=3.5/5,
+                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+            for ax, title in zip(g.axes.flat, titles):
+                ax.set_title(title)
+            g.set(xlabel='')
+            g.axes[0].set_ylabel('mean smoothed kmer multivalency')
+            ax = g.axes[0]
+            ax.set_xlim([window, (2*window)+50])
+            ax.set_ylim([1.4, 2])
+            ax = g.axes[1]
+            ax.set_xlim([(2*window)-50, 3*window])
+            ax = g.axes[2]
+            ax.set_xlim([window, (2*window)+50])
+            ax = g.axes[3]
+            ax.set_xlim([(2*window)-50, 3*window])
+            ax = g.axes[4]
+            ax.set_xlim([window, (2*window)+50])
+            ax = g.axes[5]
+            ax.set_xlim([(2*window)-50, 3*window])
+            plt.tight_layout()
+            plt.savefig(f'{output_dir}/{name}_RNAmap_multivalency.pdf')
+            pbt.helpers.cleanup()
         sys.exit()
 
 
@@ -461,9 +466,11 @@ if __name__=='__main__':
         max_inclusion,
         max_fdr,
         max_enh,
-        min_sil
+        min_sil,
+        multivalency,
+        germsdir
     ) = cli()
     
     run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder)
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir)
 
