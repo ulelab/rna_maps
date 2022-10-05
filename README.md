@@ -24,6 +24,22 @@ python rna_maps.py \
 This code accepts rMATs junction only quantified files, or Whippet.
 Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
 
+*Multivalency analysis*:
+Multivalency analysis adds on run time & involves installing the Ule lab's GeRMs package which is still in development, so it is optional and enabled with the flag `-v`.
+Currently to run the analysis you will need to install the GeRMs package. To do this clone the repository to your computer somewhere and run the following command from within the repository (you will need to have R devtools installed):
+`R -e 'devtools::install()'`
+
+You will need to ensure you have the GeRMs requirements installed too, which are: biostrings, parallel, logger and optparse.
+Finally, when you run RNA maps you will need to provide the location of your "germs" repo, so that the script can find germs.R to run the multivalency calculations using the flag `-g`, so our test command for running multivalency will look like:
+```
+python rna_maps.py \
+-i test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
+-x test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
+-f test/homosapien-hg37-chr21.fa \
+-fi test/homosapien-hg37-chr21.fa.fai \
+-v -g ../germs
+```
+
 
 **Dependencies** (these are the versions the script was developped with, pandas >= 1 introduced breaking changes, please use these versions):
 ```
