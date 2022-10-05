@@ -21,7 +21,7 @@ python rna_maps.py \
 ```
 *Preparing RNA-Seq data*:
 
-This code accepts rMATs junction only quantified files, or Whippet.
+This code accepts rMATs junction only quantified files.
 Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
 
 *Multivalency analysis*:
