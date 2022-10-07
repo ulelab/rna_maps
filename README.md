@@ -21,7 +21,7 @@ python rna_maps.py \
 ```
 *Preparing RNA-Seq data*:
 
-This code accepts rMATs junction only quantified files, or Whippet.
+This code accepts rMATs junction only quantified files.
 Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
 
 *Multivalency analysis*:
@@ -54,11 +54,12 @@ scipy=1.3.1
 
 **Usage**:  
 ```
-python3 rna_maps.py -h                                                                                                                                                      
-usage: rna_maps.py [-h] -i INPUTSPLICE -x INPUTXLSITES -f FASTAINDEX
-                   [-o [OUTPUTPATH]] [-w [WINDOW]] [-s [SMOOTHING]]
+python rna_maps.py -h
+usage: rna_maps.py [-h] -i INPUTSPLICE -x INPUTXLSITES -f GENOMEFASTA -fi
+                   FASTAINDEX [-o [OUTPUTPATH]] [-w [WINDOW]] [-s [SMOOTHING]]
                    [-mc [MINCTRL]] [-xc [MAXCTRL]] [-xi [MAXINCL]]
-                   [-xf [MAXFDR]] [-xe [MAXENH]] [-ms [MINSIL]]
+                   [-xf [MAXFDR]] [-xe [MAXENH]] [-ms [MINSIL]] [-v]
+                   [-g [GERMSDIR]]
 
 Plot CLIP crosslinks around regulated exons to study position-dependent impact
 on pre-mRNA splicing.
@@ -69,7 +70,9 @@ required arguments:
                         rMATS
   -x INPUTXLSITES, --inputxlsites INPUTXLSITES
                         CLIP crosslinks in BED file format
-  -f FASTAINDEX, --fastaindex FASTAINDEX
+  -f GENOMEFASTA, --genomefasta GENOMEFASTA
+                        genome fasta file (.fa)
+  -fi FASTAINDEX, --fastaindex FASTAINDEX
                         genome fasta index file (.fai)
 
 optional arguments:
@@ -97,7 +100,12 @@ optional arguments:
                         [DEFAULT -0.05]
   -ms [MINSIL], --minsil [MINSIL]
                         minimum inclusion for exons to be considered silenced
-                        [DEFAULT 0.05] 
+                        [DEFAULT 0.05]
+  -v, --multivalency
+  -g [GERMSDIR], --germsdir [GERMSDIR]
+                        directory for where to find germs.R for multivalency
+                        analysis eg. /Users/Bellinda/repos/germs [DEFAULT
+                        current directory]
 ```
 
 ### Definitions
