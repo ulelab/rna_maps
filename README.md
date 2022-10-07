@@ -19,12 +19,13 @@ python rna_maps.py \
 -f test/homosapien-hg37-chr21.fa \
 -fi test/homosapien-hg37-chr21.fa.fai
 ```
-*Preparing RNA-Seq data*:
+**Preparing RNA-Seq data**:
 
 This code accepts rMATs junction only quantified files.
 Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
 
-*Multivalency analysis*:
+**Multivalency analysis**:
+
 Multivalency analysis adds on run time & involves installing the Ule lab's GeRMs package which is still in development, so it is optional and enabled with the flag `-v`.
 Currently to run the analysis you will need to install the GeRMs package. To do this clone the repository to your computer somewhere and run the following command from within the repository (you will need to have R devtools installed):
 `R -e 'devtools::install()'`
@@ -39,7 +40,7 @@ python rna_maps.py \
 -fi test/homosapien-hg37-chr21.fa.fai \
 -v -g ../germs
 ```
-
+If you want to create a multivalency map alone (no CLIP data) simply run the above command with the `-x crosslinks.bed` excluded.
 
 **Dependencies** (these are the versions the script was developped with, pandas >= 1 introduced breaking changes, please use these versions):
 ```
