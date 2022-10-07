@@ -27,7 +27,7 @@ def cli():
     required = parser.add_argument_group('required arguments')
     required.add_argument('-i',"--inputsplice", type=str, required=True,
                         help='quantification of differential splicing produced by rMATS')
-    required.add_argument('-x',"--inputxlsites", type=str, required=True,
+    optional.add_argument('-x',"--inputxlsites", type=str, nargs='?',
                         help='CLIP crosslinks in BED file format')
     required.add_argument('-f',"--genomefasta", type=str, required=True,
                         help='genome fasta file (.fa)')
@@ -254,162 +254,164 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','upstreamEE')
         upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','upstreamES')
 
-        middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
-        middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss')
-        downstream_3ss = get_coverage_plot(xl_bed, downstream_3ss_bed, fai, window, exon_categories, 'downstream_3ss')
-        downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss')
-        upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
-        upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss')
+        if xl_bed is not None:
+            middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
+            middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss')
+            downstream_3ss = get_coverage_plot(xl_bed, downstream_3ss_bed, fai, window, exon_categories, 'downstream_3ss')
+            downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss')
+            upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
+            upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss')
 
 
-        plotting_df = pd.concat([middle_3ss, middle_5ss, downstream_3ss, downstream_5ss, upstream_3ss, upstream_5ss])
+            plotting_df = pd.concat([middle_3ss, middle_5ss, downstream_3ss, downstream_5ss, upstream_3ss, upstream_5ss])
+            plotting_df.to_csv(f'{output_dir}/{name}_RNAmap.tsv', sep="\t")
 
-        #sns.set(rc={'figure.figsize':(7, 5)})
-        sns.set_style("whitegrid")
-        g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', facet_kws={"sharex":False},
-                    kind='line', col_wrap=6, height=5, aspect=4/5,
-                    col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
-        titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
-        for ax, title in zip(g.axes.flat, titles):
-            ax.set_title(title)
-        g.set(xlabel='')
-        g.axes[0].set_ylabel('-log10(p value) enrichment / control')
- 
+            #sns.set(rc={'figure.figsize':(7, 5)})
+            sns.set_style("whitegrid")
+            g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', facet_kws={"sharex":False},
+                        kind='line', col_wrap=6, height=5, aspect=4/5,
+                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+            for ax, title in zip(g.axes.flat, titles):
+                ax.set_title(title)
+            g.set(xlabel='')
+            g.axes[0].set_ylabel('-log10(p value) enrichment / control')
+    
 
-        ### Add exon-intron drawing below line plots ###
-        # for calculating rectangle size
-        rect_fraction = 1 / ((window + 50) / 50)
+            ### Add exon-intron drawing below line plots ###
+            # for calculating rectangle size
+            rect_fraction = 1 / ((window + 50) / 50)
 
-        ax = g.axes[0]
-        ax.set_xlim([0, window+50])
-        a=ax.get_xticks().tolist()
-        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-        a = np.arange(0-window, 51, 50)
-        ax.set_xticklabels(a)
-        rect = matplotlib.patches.Rectangle(
-             xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[0]
+            ax.set_xlim([0, window+50])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(0-window, 51, 50)
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[0]
-        rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.25), width=1 - rect_fraction, height=.001,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[0]
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.25), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[1]
-        ax.set_xlim([0, window+50])
-        a=ax.get_xticks().tolist()
-        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-        a = np.arange(-50,window + 1, 50)
-        ax.set_xticklabels(a)
-        rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.3), width=rect_fraction, height=.1,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[1]
+            ax.set_xlim([0, window+50])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(-50,window + 1, 50)
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.3), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[1]
-        rect = matplotlib.patches.Rectangle(
-             xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[1]
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[2]
-        ax.set_xlim([0, window+50])
-        a=ax.get_xticks().tolist()
-        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-        a = np.arange(0-window, 51, 50)
-        ax.set_xticklabels(a)
-        rect = matplotlib.patches.Rectangle(
-             xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
-             color="midnightblue", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[2]
+            ax.set_xlim([0, window+50])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(0-window, 51, 50)
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[2]
-        rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.25), width=1 - rect_fraction, height=.001,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[2]
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.25), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[3]
-        ax.set_xlim([0, window+50])
-        a=ax.get_xticks().tolist()
-        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-        a = np.arange(-50,window + 1, 50)
-        ax.set_xticklabels(a)
-        rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.3), width=rect_fraction, height=.1,
-             color="midnightblue", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[3]
+            ax.set_xlim([0, window+50])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(-50,window + 1, 50)
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.3), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[3]
-        rect = matplotlib.patches.Rectangle(
-             xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[3]
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[4]
-        ax.set_xlim([0, window+50])
-        a=ax.get_xticks().tolist()
-        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-        a = np.arange(0-window, 51, 50)
-        ax.set_xticklabels(a)
-        rect = matplotlib.patches.Rectangle(
-             xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[4]
+            ax.set_xlim([0, window+50])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(0-window, 51, 50)
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.3), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[4]
-        rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.25), width=1 - rect_fraction, height=.001,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[4]
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.25), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[5]
-        ax.set_xlim([0, window+50])
-        a=ax.get_xticks().tolist()
-        ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-        a = np.arange(-50,window + 1, 50)
-        ax.set_xticklabels(a)
-        rect = matplotlib.patches.Rectangle(
-             xy=(0, -0.3), width=rect_fraction, height=.1,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[5]
+            ax.set_xlim([0, window+50])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(-50,window + 1, 50)
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.3), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        ax = g.axes[5]
-        rect = matplotlib.patches.Rectangle(
-             xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
-             color="slategrey", alpha=1,
-             transform=ax.transAxes, clip_on=False,
-            )
-        ax.add_artist(rect)
+            ax = g.axes[5]
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.25), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
 
-        plt.tight_layout()
-        plt.subplots_adjust(wspace=0.01)
-        plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf')
-        pbt.helpers.cleanup()
+            plt.tight_layout()
+            plt.subplots_adjust(wspace=0.01)
+            plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf')
+            pbt.helpers.cleanup()
 
         if multivalency:
             ### Get multivalency scores ###
@@ -421,6 +423,8 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss',germsdir)
 
             plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
+
+            plotting_df.to_csv(f'{output_dir}/{name}_RNAmap_multivalency.tsv', sep="\t")
 
             plt.figure()
             sns.set_style("whitegrid")
