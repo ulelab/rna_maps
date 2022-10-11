@@ -153,7 +153,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     print("Running germs to calculate multivalency scores...")
 
     os.system("RScript --vanilla " + germsdir + "/germs.R -f " + f'{output_dir}/{name}_temp.fa' + " -w 100 -s 20")
-    os.system("gunzip *multivalency.tsv.gz")
+    os.system("gunzip -f *multivalency.tsv.gz")
     mdf = pd.read_csv(f'{output_dir}/{name}_temp_5_101_21.multivalency.tsv', sep='\t', header=0)
     os.system(f'rm {output_dir}/{name}_temp_5_101_21.multivalency.tsv')
     os.system(f'rm {output_dir}/{name}_temp.fa')
