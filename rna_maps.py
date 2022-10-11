@@ -144,7 +144,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     df = df.loc[(df.name != ".") & (pd.notnull(df.name)) & (df.name != "None")]
     df = df[['chr', 'start', 'end', 'name', 'score', 'strand']]
     df.columns = ['chr', 'start', 'stop', 'name', 'score', 'strand']
-    df['name'] = df['name'].apply(lambda x: (str(x) + "XX" + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase))))
+    df['name'] = df['name'].apply(lambda x: (str(x) + "XX" + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase))  + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase))))
     pbt_df = pbt.BedTool.from_dataframe(df[['chr', 'start', 'stop', 'name', 'score', 'strand']]).sort().slop(l=2*window, r=2*window, s=True, g=fai)
     print("Number of sites: " + str(len(pbt_df)))
     pbts = pbt.BedTool.filter(pbt_df, lambda x: len(x) == (4*window) + 1).saveas()
