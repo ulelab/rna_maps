@@ -157,7 +157,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     mdf = pd.read_csv(f'{output_dir}/{name}_temp_5_101_21.multivalency.tsv', sep='\t', header=0)
     os.system(f'rm {output_dir}/{name}_temp_5_101_21.multivalency.tsv')
     os.system(f'rm {output_dir}/{name}_temp.fa')
-    mdf['position'] = np.tile(np.arange(0, 4*window - 3), len(df))
+    mdf['position'] = np.tile(np.arange(0, 4*window - 3), len(pbts))
 
     mdf[['label','roname']] = mdf['sequence_name'].str.split('XX',expand=True)
     mdf = mdf.groupby(['label','position'], as_index=False).agg({'smoothed_kmer_multivalency':'mean'})
