@@ -149,7 +149,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     print("Number of sites: " + str(len(pbt_df)))
     pbts = pbt.BedTool.filter(pbt_df, lambda x: len(x) == (4*window) + 1)
     print("Number of seqs considered after filtering those that run off the end of chroms: " + str(len(pbts)))
-    pbt_df.sequence(fi=genome_fasta,name=True).save_seqs(f'{output_dir}/{name}_temp.fa')
+    pbts.sequence(fi=genome_fasta,name=True).save_seqs(f'{output_dir}/{name}_temp.fa')
     print("Running germs to calculate multivalency scores...")
 
     os.system("RScript --vanilla " + germsdir + "/germs.R -f " + f'{output_dir}/{name}_temp.fa' + " -w 100 -s 20")
