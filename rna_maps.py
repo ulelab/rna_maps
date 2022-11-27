@@ -350,7 +350,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[3]
-            ax.set_xlim([window+50, window*2]])
+            ax.set_xlim([window+50, window*2])
             a=ax.get_xticks().tolist()
             ax.xaxis.set_major_locator(mticker.FixedLocator(a))
             a = np.arange(-50,window + 1, 50)
@@ -392,7 +392,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[5]
-            ax.set_xlim([window+50, window*2]])
+            ax.set_xlim([window+50, window*2])
             a=ax.get_xticks().tolist()
             ax.xaxis.set_major_locator(mticker.FixedLocator(a))
             a = np.arange(-50,window + 1, 50)
