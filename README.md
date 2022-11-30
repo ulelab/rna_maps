@@ -22,7 +22,7 @@ python rna_maps.py \
 **Preparing RNA-Seq data**:
 
 This code accepts rMATs junction only quantified files.
-Be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct.
+If your condition is RBP knockdown be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct. If your condition is RBP overexpression you will need to run the comparison as control - condition. In the generic example group1 - group2 consider that the definition of "enhanced" or "repressed" are in reference to group2. ie. an exon is enhanced in group2 vs. group1.
 
 **Multivalency analysis**:
 
