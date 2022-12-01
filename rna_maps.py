@@ -287,12 +287,18 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             leg.set_bbox_to_anchor([1.04,0.75])
             leg.set_title("")
             exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
-            leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
-            leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
-            leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
-            leg.texts[3].set_text("Enhanced Rest (" + str(exon_cat[exon_cat['name']=="enhanced_rest"]["number_exons"].values[0]) + ")")
-            leg.texts[4].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
-            leg.texts[5].set_text("Silenced Rest (" + str(exon_cat[exon_cat['name']=="silenced_rest"]["number_exons"].values[0]) + ")")
+            if len(exon_cat[exon_cat['name']=="enhanced_rest"].index) != 0 :
+                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
+                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
+                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
+                leg.texts[4].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
+                leg.texts[3].set_text("Enhanced Rest (" + str(exon_cat[exon_cat['name']=="enhanced_rest"]["number_exons"].values[0]) + ")")
+                leg.texts[5].set_text("Silenced Rest (" + str(exon_cat[exon_cat['name']=="silenced_rest"]["number_exons"].values[0]) + ")")
+            else:
+                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
+                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
+                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
+                leg.texts[3].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
 
 			
             ### Add exon-intron drawing below line plots ###
@@ -453,6 +459,8 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         if multivalency:
             ### Get multivalency scores ###
+            rect_fraction = 1 / ((window + 50) / 50)
+
             middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss',germsdir)
             middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss',germsdir)
             downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss',germsdir)
@@ -477,15 +485,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             leg.set_bbox_to_anchor([1.04,0.75])
             leg.set_title("")
             exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
-            leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
-            leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
-            leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
-            leg.texts[3].set_text("Enhanced Rest (" + str(exon_cat[exon_cat['name']=="enhanced_rest"]["number_exons"].values[0]) + ")")
-            leg.texts[4].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
-            leg.texts[5].set_text("Silenced Rest (" + str(exon_cat[exon_cat['name']=="silenced_rest"]["number_exons"].values[0]) + ")")
+            if len(exon_cat[exon_cat['name']=="enhanced_rest"].index) != 0 :
+                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
+                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
+                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
+                leg.texts[4].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
+                leg.texts[3].set_text("Enhanced Rest (" + str(exon_cat[exon_cat['name']=="enhanced_rest"]["number_exons"].values[0]) + ")")
+                leg.texts[5].set_text("Silenced Rest (" + str(exon_cat[exon_cat['name']=="silenced_rest"]["number_exons"].values[0]) + ")")
+            else:
+                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
+                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
+                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
+                leg.texts[3].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
 
             ax = g.axes[0]
             ax.set_xlim([window, (2*window)+50])
+            ax.set_ylim(ymin=1)
             start, end = ax.get_xlim()
             ax.xaxis.set_ticks(np.arange(start, end, 50))
             a=ax.get_xticks().tolist()
@@ -507,9 +522,6 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 transform=ax.transAxes, clip_on=False,
                 )
             ax.add_artist(rect)
-
-
-
 
             ax = g.axes[1]
             ax.set_xlim([(2*window)-50, 3*window])
