@@ -287,7 +287,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             leg.set_bbox_to_anchor([1.04,0.75])
             leg.set_title("")
             exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
-            if exon_cat[exon_cat['name']=="enhanced_rest"].shape[0] == 0 :
+            if len(exon_cat[exon_cat['name']=="enhanced_rest"].index) == 0 :
                 leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
                 leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
                 leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
@@ -485,7 +485,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             leg.set_bbox_to_anchor([1.04,0.75])
             leg.set_title("")
             exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
-            if exon_cat[exon_cat['name']=="enhanced_rest"].shape[0] == 0 :
+            if len(exon_cat[exon_cat['name']=="enhanced_rest"].index) == 0 :
                 leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
                 leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
                 leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
