@@ -53,26 +53,6 @@ seaborn=0.11.0
 scipy=1.3.1
 ```
 
-**Test your installation**
-
-To run a small test you can execute the following command:
-```
-python3 rna_maps.py \
-test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
-test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
-test/GRCh38.release34.primary_assembly.genome.fa.fai \
-. \
-1000 \
-15 \
--0.05 \
-0.05 \
-0.9 \
-0.1 \
--0.05 \
-0.05 \
-0.9
-```
-
 **Usage**:  
 ```
 python rna_maps.py -h
