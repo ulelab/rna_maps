@@ -29,6 +29,8 @@ def cli():
     required = parser.add_argument_group('required arguments')
     required.add_argument('-i',"--inputsplice", type=str, required=True,
                         help='quantification of differential splicing produced by rMATS')
+    required.add_argument('-e',"--eventtype", type=str, required=True, choices=['RI','SE'],
+                        help='type of splicing, options are: SE,RI')
     optional.add_argument('-x',"--inputxlsites", type=str, nargs='?',
                         help='CLIP crosslinks in BED file format')
     required.add_argument('-f',"--genomefasta", type=str, required=True,
@@ -75,7 +77,8 @@ def cli():
         args.maxenh,
         args.minsil,
         args.multivalency,
-        args.germsdir
+        args.germsdir,
+        args.eventtype
         )
 
 def df_apply(col_fn, *col_names):
@@ -169,14 +172,15 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     return mdf
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, eventtype
        #n_exons = 150, n_samples = 300, z_test=False
        ):
     name = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
     df_fai = pd.read_csv(fai, sep='\t', header=None)
     chroms = set(df_fai[0].values)
     rmats = pd.read_csv(de_file, sep='\t')
-    if 'exonStart_0base' in rmats.columns:
+
+    if eventtype == "SE":
         rmats = rmats[rmats['chr'].isin(chroms)]
         rmats['inclusion'] = (rmats.IncLevel1.str.split(',') + rmats.IncLevel2.str.split(','))
         # code below for mean inclusion
@@ -186,8 +190,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         df_rmats =  rmats.loc[ : ,['chr', 'exonStart_0base', 'exonEnd', 'FDR', 'IncLevelDifference', 'strand', 'inclusion', 
                                    'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE']].rename(
             columns={'IncLevelDifference': 'dPSI', 'inclusion':'maxPSI'}).reset_index()
-   
-        
+
         # to deduplicate, first select the most extreme dPSI value for every exon (keep ties, they will be resolved by the hierarchy)
         df_rmats = df_rmats[df_rmats.groupby(['chr', 'exonStart_0base', 'exonEnd', 'strand'])['dPSI'].apply(lambda x: abs(x).rank(ascending=False) < 2)]
 
@@ -250,7 +253,6 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         plt.savefig(f'{output_dir}/{name}_exon_length.pdf')
         pbt.helpers.cleanup()
 
-
         ### The coverage plot ###
 
         middle_3ss_bed = get_ss_bed(df_rmats,'exonStart_0base','exonEnd')
@@ -300,7 +302,6 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
                 leg.texts[3].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
 
-			
             ### Add exon-intron drawing below line plots ###
             # for calculating rectangle size
             rect_fraction = 1 / ((window + 50) / 50)
@@ -343,8 +344,6 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 transform=ax.transAxes, clip_on=False,
                 )
             ax.add_artist(rect)
-
-
 
             ax = g.axes[1]
             rect = matplotlib.patches.Rectangle(
@@ -650,6 +649,379 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             pbt.helpers.cleanup()
         sys.exit()
 
+    if eventtype == "RI":
+        rmats = rmats[rmats['chr'].isin(chroms)]
+        rmats['inclusion'] = (rmats.IncLevel1.str.split(',') + rmats.IncLevel2.str.split(','))
+        # code below for mean inclusion
+        # rmats['inclusion'] = rmats['inclusion'].apply(lambda x: sum([float(y) for y in x if y != 'NA']) / len(x))
+        # replaces with max inclusion
+        rmats['inclusion'] = rmats['inclusion'].apply(lambda x: max([float(y) for y in x if y != 'NA']))
+        df_rmats =  rmats.loc[ : ,['chr', 'riExonStart_0base', 'riExonEnd', 'FDR', 'IncLevelDifference', 'strand', 'inclusion', 
+                                   'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE']].rename(
+            columns={'IncLevelDifference': 'dPSI', 'inclusion':'maxPSI'}).reset_index()
+
+        # to deduplicate, first select the most extreme dPSI value for every exon (keep ties, they will be resolved by the hierarchy)
+        df_rmats = df_rmats[df_rmats.groupby(['chr', 'riExonStart_0base', 'riExonEnd', 'strand'])['dPSI'].apply(lambda x: abs(x).rank(ascending=False) < 2)]
+
+        # then apply hierarchy to decide which category exons belong to
+        conditions = [
+            (df_rmats["dPSI"].gt(min_sil) & df_rmats["FDR"].lt(max_fdr)), # silenced
+            (df_rmats["dPSI"].lt(max_enh) & df_rmats["FDR"].lt(max_fdr)), # enhanced
+            (df_rmats["dPSI"].gt(min_sil)), # silenced rest
+            (df_rmats["dPSI"].lt(max_enh)), # enhanced rest
+            (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl) & df_rmats["maxPSI"].gt(max_inclusion)), # constituitive
+            (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl))# control
+        ]
+
+        choices = ["silenced", "enhanced", "silenced_rest", "enhanced_rest", "constituitive", "control"]
+
+        df_rmats["category"] = np.select(conditions, choices, default=None)
+
+        exon_categories = df_rmats.groupby('category').size()
+        #exon_categories.columns = ["name", "exon_number"]
+        # logging info
+        print("Introns in each category:")
+        print(exon_categories)
+        print("Total categorised deduplicated introns: ", str(df_rmats.shape[0]))
+
+        ### Some warning messages ###
+        if exon_categories.loc["control"] == 0:
+            print("Warning! There are no control introns. Try changing thresholds or input file and run again.")
+            sys.exit()
+        
+        if exon_categories.loc["enhanced"] == 0 and exon_categories.loc["silenced"] == 0:
+            print('Warning! There are no regulated introns, try changing filtering parameters or file and run again.')
+            sys.exit()
+        
+        ####### Intron lengths #######
+        df_rmats["regulated_intron_length"] = df_rmats['riExonEnd'] - df_rmats['riExonStart_0base']
+        df_rmats["upstream_exon_length"] = df_rmats['upstreamEE'] - df_rmats['upstreamES']
+        df_rmats["downstream_exon_length"] = df_rmats['downstreamEE'] - df_rmats['downstreamES']
+
+        exon_length_df = df_rmats[["regulated_intron_length","upstream_exon_length","downstream_exon_length","category"]]
+
+        exon_length_df = exon_length_df.melt(id_vars=["category"], var_name="exon_type", value_name="length")
+        
+        palette_exon_len = [colors_dict['ctrl'], colors_dict['const'], colors_dict['enh'], 
+                            colors_dict['enhrest'], colors_dict['sil'], colors_dict['silrest'], colors_dict['all']]
+
+        sns.set(rc={'figure.figsize':(15, 5)})
+        sns.set_style("whitegrid")
+        g = sns.catplot(data=exon_length_df, x='category', y='length',col='exon_type', 
+                    kind='box', col_wrap=3, showfliers=False, sharey=False,
+                    col_order=["upstream_exon_length","regulated_intron_length","downstream_exon_length"],
+                    order=["control","constituitive","enhanced","enhanced_rest","silenced","silenced_rest"],
+                    palette = palette_exon_len)
+        titles = ["Upstream Exon", "Intron", "Downstream exon"]
+        for ax, title in zip(g.axes.flat, titles):
+            ax.set_title(title)
+        g.set_xticklabels(rotation=45)
+        g.set(xlabel=None)
+        g.axes[0].set_ylabel('Length (bp)')
+        plt.tight_layout()
+        plt.savefig(f'{output_dir}/{name}_length.pdf')
+        pbt.helpers.cleanup()
+
+        ### The coverage plot ###
+
+        middle_3ss_bed = get_ss_bed(df_rmats,'riExonStart_0base','riExonEnd')
+        middle_5ss_bed = get_ss_bed(df_rmats,'riExonEnd','riExonStart_0base')
+        downstream_5ss_bed = get_ss_bed(df_rmats,'downstreamEE','downstreamES')
+        upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','upstreamEE')
+       
+
+        if xl_bed is not None:
+            middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
+            middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss')
+            downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss')
+            upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
+
+
+            plotting_df = pd.concat([middle_3ss, middle_5ss, downstream_5ss, upstream_3ss])
+            plotting_df.to_csv(f'{output_dir}/{name}_RNAmap.tsv', sep="\t")
+
+            #sns.set(rc={'figure.figsize':(7, 5)})
+            sns.set_style("whitegrid")
+
+            g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', facet_kws={"sharex":False},
+                        kind='line', col_wrap=6, height=5, aspect=4/5,
+                        col_order=["upstream_3ss","middle_3ss","middle_5ss","downstream_5ss"])
+            titles = ["Upstream 3'SS", "Middle 5'SS", "Middle 3'SS", "Downstream 5'SS"]
+            for ax, title in zip(g.axes.flat, titles):
+                ax.set_title(title)
+            g.set(xlabel='')
+            g.axes[0].set_ylabel('-log10(p value) enrichment / control')
+            leg = g._legend
+            leg.set_bbox_to_anchor([1.04,0.75])
+            leg.set_title("")
+            exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
+            if len(exon_cat[exon_cat['name']=="enhanced_rest"].index) != 0 :
+                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
+                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
+                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
+                leg.texts[4].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
+                leg.texts[3].set_text("Enhanced Rest (" + str(exon_cat[exon_cat['name']=="enhanced_rest"]["number_exons"].values[0]) + ")")
+                leg.texts[5].set_text("Silenced Rest (" + str(exon_cat[exon_cat['name']=="silenced_rest"]["number_exons"].values[0]) + ")")
+            else:
+                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
+                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
+                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
+                leg.texts[3].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
+
+            ### Add exon-intron drawing below line plots ###
+            # for calculating rectangle size
+            rect_fraction = 1 / ((window + 50) / 50)
+
+            ax = g.axes[0]
+            ax.set_xlim([0, window+50])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(0-window, 51, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            a[-1] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[1]
+            ax.set_xlim([window-50, window*2])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(-50,window + 1, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            a[-1] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[1]
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[2]
+            ax.set_xlim([0, window+50])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(0-window, 51, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            a[-1] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[2]
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[3]
+            ax.set_xlim([window-50, window*2])
+            a=ax.get_xticks().tolist()
+            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
+            a = np.arange(-50,window + 1, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            a[-1] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[3]
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+
+
+            plt.subplots_adjust(wspace=0.01)
+            plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf', 
+                bbox_extra_artists=([leg,rect]),
+                bbox_inches='tight',
+                pad_inches=0.5)
+            pbt.helpers.cleanup()
+
+        if multivalency:
+            ### Get multivalency scores ###
+            rect_fraction = 1 / ((window + 50) / 50)
+
+            middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss',germsdir)
+            middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss',germsdir)
+            downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss',germsdir)
+            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss',germsdir)
+            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss',germsdir)
+            upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss',germsdir)
+
+            plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
+            plotting_df.to_csv(f'{output_dir}/{name}_RNAmap_multivalency.tsv', sep="\t")
+
+            plt.figure()
+            sns.set_style("whitegrid")
+            g = sns.relplot(data=plotting_df, x='position', y='smoothed_kmer_multivalency', hue='label', col='type', facet_kws={"sharex":False},
+                        kind='line', col_wrap=6, height=5, aspect=3.5/5,
+                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+            for ax, title in zip(g.axes.flat, titles):
+                ax.set_title(title)
+            g.set(xlabel='')
+            g.axes[0].set_ylabel('mean smoothed kmer multivalency')
+            leg = g._legend
+            leg.set_bbox_to_anchor([1.04,0.75])
+            leg.set_title("")
+            exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
+            if len(exon_cat[exon_cat['name']=="enhanced_rest"].index) != 0 :
+                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
+                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
+                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
+                leg.texts[4].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
+                leg.texts[3].set_text("Enhanced Rest (" + str(exon_cat[exon_cat['name']=="enhanced_rest"]["number_exons"].values[0]) + ")")
+                leg.texts[5].set_text("Silenced Rest (" + str(exon_cat[exon_cat['name']=="silenced_rest"]["number_exons"].values[0]) + ")")
+            else:
+                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
+                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
+                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
+                leg.texts[3].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
+
+            ax = g.axes[0]
+            ax.set_xlim([window, (2*window)+50])
+            ax.set_ylim(ymin=1)
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-window,50, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[1]
+            ax.set_xlim([(2*window)-50, 3*window])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-50,window, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[1]
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[2]
+            ax.set_xlim([window, (2*window)+50])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-window,50, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[3]
+            ax.set_xlim([(2*window)-50, 3*window])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-50,window, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            plt.subplots_adjust(wspace=0.01)
+            plt.savefig(f'{output_dir}/{name}_RNAmap_multivalency.pdf',
+                bbox_extra_artists=([leg,rect]),
+                bbox_inches='tight',
+                pad_inches=0.5)
+            pbt.helpers.cleanup()
+        sys.exit()
+
 
  
 if __name__=='__main__':
@@ -668,9 +1040,10 @@ if __name__=='__main__':
         max_enh,
         min_sil,
         multivalency,
-        germsdir
+        germsdir,
+        eventtype
     ) = cli()
     
     run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir)
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, eventtype)
 
