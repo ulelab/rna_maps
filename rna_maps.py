@@ -205,6 +205,8 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         df_rmats["category"] = np.select(conditions, choices, default=None)
 
+        df_rmats.to_csv(f'{output_dir}/{name}_RMATS_with_categories.tsv', sep="\t")
+
         exon_categories = df_rmats.groupby('category').size()
         #exon_categories.columns = ["name", "exon_number"]
         # logging info
