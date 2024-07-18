@@ -21,7 +21,8 @@ python rna_maps.py \
 ```
 **Preparing RNA-Seq data**:
 
-This code accepts rMATs junction only quantified files.
+This code accepts rMATs quantified files for cassette exons (e.g. SE.MATS.JCEC.txt).
+
 If your condition is RBP knockdown be sure to run your comparison as condition - control, such that definitions of enhanced and repressed are correct. If your condition is RBP overexpression you will need to run the comparison as control - condition. In the generic example group1 - group2 consider that the definition of "enhanced" or "repressed" are in reference to group2. ie. an exon is enhanced in group2 vs. group1.
 
 **Multivalency analysis**:
@@ -153,9 +154,9 @@ maxPSI (  0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0.9xxxxxx> 1 )
 FDR    (  0 -----0.1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx> 1 )
 ```
 
-**Heirarchy**
+**Hierarchy**
 
-When it comes to alternative exons, an exon may be involved in multiple events, but we want to avoid plotting it many times, so we implement a heirarchy:
+When it comes to alternative exons, an exon may be involved in multiple events, but we want to avoid plotting it many times, so we implement a hierarchy:
 
 1. If an exon meets criteria for silenced or enhanced this is designated, if criteria for both is met the most extreme dPSI value is preferred.
 2. Of remaining exons, if they meet criteria for enhanced/silenced rest this is designated, if criteria for both is met the most extreme dPSI value is preferred.
