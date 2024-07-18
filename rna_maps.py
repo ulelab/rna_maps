@@ -142,7 +142,7 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
         
 
 def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, type, germsdir):
-    """Return multivalency cores around df features extended by windows"""
+    """Return multivalency scores around df features extended by windows"""
     df = df.loc[(df.name != ".") & (pd.notnull(df.name)) & (df.name != "None")]
     df = df[['chr', 'start', 'end', 'name', 'score', 'strand']]
     df.columns = ['chr', 'start', 'stop', 'name', 'score', 'strand']
@@ -151,22 +151,48 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     print("Number of sites: " + str(len(pbt_df)))
     pbts = pbt.BedTool.filter(pbt_df, lambda x: len(x) == (4*window) + 1).saveas()
     print("Number of seqs considered after filtering those that run off the end of chroms: " + str(len(pbts)))
-    pbts.sequence(fi=genome_fasta,name=True).save_seqs(f'{output_dir}/{name}_temp.fa')
+    pbts.sequence(fi=genome_fasta,name=True).save_seqs(f'{output_dir}/{name}_{type}_temp.fa')
     print("Running germs to calculate multivalency scores...")
 
-    os.system("RScript --vanilla " + germsdir + "/germs.R -f " + f'{output_dir}/{name}_temp.fa' + " -w 100 -s 20")
+    os.system("RScript --vanilla " + germsdir + "/germs.R -f " + f'{output_dir}/{name}_{type}_temp.fa' + " -w 100 -s 20")
     os.system("gunzip -f *multivalency.tsv.gz")
-    mdf = pd.read_csv(f'{output_dir}/{name}_temp_5_101_21.multivalency.tsv', sep='\t', header=0)
-    os.system(f'rm {output_dir}/{name}_temp_5_101_21.multivalency.tsv')
-    os.system(f'rm {output_dir}/{name}_temp.fa')
+    mdf = pd.read_csv(f'{output_dir}/{name}_{type}_temp_5_101_21.multivalency.tsv', sep='\t', header=0)
+    os.system(f'rm {output_dir}/{name}_{type}_temp_5_101_21.multivalency.tsv')
+    os.system(f'rm {output_dir}/{name}_{type}_temp.fa')
     mdf['position'] = np.tile(np.arange(0, 4*window - 3), len(pbts))
 
     mdf[['label','roname']] = mdf['sequence_name'].str.split('XX',expand=True)
+
+    # GET MOST CONTRIBUTING KMERS
+    # Add 'exon_type' column by splitting 'sequence_name' on 'XX'
+    mdf['exon_type'] = mdf['sequence_name'].str.split('XX').str[0]
+    # Filter for 'exon_type' being 'enhanced' or 'silenced'
+    filtered_mdf = mdf[mdf['exon_type'].isin(['enhanced', 'silenced'])]
+    # Separate dataframes for enhanced and silenced exon_types
+    enhanced_df = filtered_mdf[filtered_mdf['exon_type'] == 'enhanced']
+    silenced_df = filtered_mdf[filtered_mdf['exon_type'] == 'silenced']
+    # Function to calculate top 10 kmers for a given DataFrame
+    def calculate_top_kmers(df):
+        kmer_scores = df.groupby('kmer')['smoothed_kmer_multivalency'].sum()
+        top_kmers = kmer_scores.nlargest(5).index
+        return df[df['kmer'].isin(top_kmers)]
+    # Calculate top 10 kmers for enhanced and silenced exon_types separately
+    top_kmers_enhanced = calculate_top_kmers(enhanced_df)
+    top_kmers_silenced = calculate_top_kmers(silenced_df)
+
+    # Combine the top kmers for enhanced and silenced into one table
+    top_kmers_df = pd.concat([top_kmers_enhanced, top_kmers_silenced])
+
     mdf = mdf.groupby(['label','position'], as_index=False).agg({'smoothed_kmer_multivalency':'mean'})
+    top_kmers_df = top_kmers_df.groupby(['label','position','exon_type','kmer'], as_index=False).agg({'smoothed_kmer_multivalency':'mean'})
+
     mdf['type'] = type
+    top_kmers_df['type'] = type
 
     mdf = mdf.loc[(mdf.label != ".") & (pd.notnull(mdf.label)) & (mdf.label != "None")]
-    return mdf
+    top_kmers_df = top_kmers_df.loc[(top_kmers_df.label != ".") & (pd.notnull(top_kmers_df.label)) & (top_kmers_df.label != "None")]
+
+    return mdf,top_kmers_df
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
         min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir
@@ -176,6 +202,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
     df_fai = pd.read_csv(fai, sep='\t', header=None)
     chroms = set(df_fai[0].values)
     rmats = pd.read_csv(de_file, sep='\t')
+
     if 'exonStart_0base' in rmats.columns:
         rmats = rmats[rmats['chr'].isin(chroms)]
         rmats['inclusion'] = (rmats.IncLevel1.str.split(',') + rmats.IncLevel2.str.split(','))
@@ -190,6 +217,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         
         # to deduplicate, first select the most extreme dPSI value for every exon (keep ties, they will be resolved by the hierarchy)
         df_rmats = df_rmats[df_rmats.groupby(['chr', 'exonStart_0base', 'exonEnd', 'strand'])['dPSI'].apply(lambda x: abs(x).rank(ascending=False) < 2)]
+
 
         # then apply hierarchy to decide which category exons belong to
         conditions = [
@@ -463,12 +491,12 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ### Get multivalency scores ###
             rect_fraction = 1 / ((window + 50) / 50)
 
-            middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss',germsdir)
-            middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss',germsdir)
-            downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss',germsdir)
-            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss',germsdir)
-            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss',germsdir)
-            upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss',germsdir)
+            middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss',germsdir)[0]
+            middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss',germsdir)[0]
+            downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss',germsdir)[0]
+            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss',germsdir)[0]
+            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss',germsdir)[0]
+            upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss',germsdir)[0]
 
             plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
             plotting_df.to_csv(f'{output_dir}/{name}_RNAmap_multivalency.tsv', sep="\t")
@@ -646,6 +674,349 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
             plt.subplots_adjust(wspace=0.01)
             plt.savefig(f'{output_dir}/{name}_RNAmap_multivalency.pdf',
+                bbox_extra_artists=([leg,rect]),
+                bbox_inches='tight',
+                pad_inches=0.5)
+            pbt.helpers.cleanup()
+
+
+
+        # DO THE SAME NOW FOR THE KMERS
+            middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss',germsdir)[1]
+            middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss',germsdir)[1]
+            downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss',germsdir)[1]
+            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss',germsdir)[1]
+            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss',germsdir)[1]
+            upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss',germsdir)[1]
+
+            plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
+            plotting_df.to_csv(f'{output_dir}/{name}_RNAmap_TOP10KMER_multivalency.tsv', sep="\t")
+
+            plt.figure()
+            sns.set_style("whitegrid")
+            g = sns.relplot(data=plotting_df[plotting_df['exon_type'] == 'silenced'], x='position', y='smoothed_kmer_multivalency', hue='kmer', col='type', facet_kws={"sharex":False},
+                        kind='line', col_wrap=6, height=5, aspect=3.5/5,
+                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+            for ax, title in zip(g.axes.flat, titles):
+                ax.set_title(title)
+            g.set(xlabel='')
+            g.axes[0].set_ylabel('mean smoothed kmer multivalency')
+            leg = g._legend
+            leg.set_bbox_to_anchor([1.04,0.75])
+            leg.set_title("")
+
+            ax = g.axes[0]
+            ax.set_xlim([window, (2*window)+50])
+            ax.set_ylim(ymin=1)
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-window,50, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[1]
+            ax.set_xlim([(2*window)-50, 3*window])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-50,window, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[1]
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[2]
+            ax.set_xlim([window, (2*window)+50])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-window,50, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[3]
+            ax.set_xlim([(2*window)-50, 3*window])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-50,window, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[4]
+            ax.set_xlim([window, (2*window)+50])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-window,50, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[5]
+            ax.set_xlim([(2*window)-50, 3*window])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-50,window, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            plt.subplots_adjust(wspace=0.01)
+            plt.savefig(f'{output_dir}/{name}_RNAmap_silencedKMER_multivalency.pdf',
+                bbox_extra_artists=([leg,rect]),
+                bbox_inches='tight',
+                pad_inches=0.5)
+            pbt.helpers.cleanup()
+
+            plt.figure()
+            sns.set_style("whitegrid")
+            g = sns.relplot(data=plotting_df[plotting_df['exon_type'] == 'enhanced'], x='position', y='smoothed_kmer_multivalency', hue='kmer', col='type', facet_kws={"sharex":False},
+                        kind='line', col_wrap=6, height=5, aspect=3.5/5,
+                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+            for ax, title in zip(g.axes.flat, titles):
+                ax.set_title(title)
+            g.set(xlabel='')
+            g.axes[0].set_ylabel('mean smoothed kmer multivalency')
+            leg = g._legend
+            leg.set_bbox_to_anchor([1.04,0.75])
+            leg.set_title("")
+
+            ax = g.axes[0]
+            ax.set_xlim([window, (2*window)+50])
+            ax.set_ylim(ymin=1)
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-window,50, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[1]
+            ax.set_xlim([(2*window)-50, 3*window])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-50,window, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[1]
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[2]
+            ax.set_xlim([window, (2*window)+50])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-window,50, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[3]
+            ax.set_xlim([(2*window)-50, 3*window])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-50,window, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="midnightblue", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[4]
+            ax.set_xlim([window, (2*window)+50])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-window,50, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            ax = g.axes[5]
+            ax.set_xlim([(2*window)-50, 3*window])
+            start, end = ax.get_xlim()
+            ax.xaxis.set_ticks(np.arange(start, end, 50))
+            a=ax.get_xticks().tolist()
+            a = np.arange(-50,window, 50)
+            a = list(map(str, a))
+            a[0] = ""
+            ax.set_xticklabels(a)
+            rect = matplotlib.patches.Rectangle(
+                xy=(0, -0.2), width=rect_fraction, height=.1,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            rect = matplotlib.patches.Rectangle(
+                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                color="slategrey", alpha=1,
+                transform=ax.transAxes, clip_on=False,
+                )
+            ax.add_artist(rect)
+
+            plt.subplots_adjust(wspace=0.01)
+            plt.savefig(f'{output_dir}/{name}_RNAmap_enhancedKMER_multivalency.pdf',
                 bbox_extra_artists=([leg,rect]),
                 bbox_inches='tight',
                 pad_inches=0.5)

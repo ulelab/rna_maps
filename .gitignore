@@ -1,1 +1,10 @@
 results
+*.pdf
+
+*.tsv
+
+*.bed
+
+*.txt
+
+*.png
