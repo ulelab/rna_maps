@@ -1,4 +1,7 @@
 results
+cirbp-rbm3
+ford23
+khsrp
 *.pdf
 
 *.tsv
@@ -8,3 +11,6 @@ results
 *.txt
 
 *.png
+*.qmd
+*bedgraph*
+*.idx

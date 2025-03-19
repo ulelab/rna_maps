@@ -54,10 +54,6 @@ def cli():
     optional.add_argument('-ms',"--minsil", type=float, default=0.05, nargs='?',
                         help='minimum inclusion for exons to be considered silenced [DEFAULT 0.05]')
     optional.add_argument('-v','--multivalency', action="store_true")
-    optional.add_argument('-us','--usescores', action="store_true",
-                        help='use scores in provided bed rather than default binary scores [DEFAULT False]')
-    optional.add_argument('-S','--unstranded', action="store_true",
-                        help='is x bed file stranded? use this flag to indicate x bed file is unstranded [DEFAULT True]')
     optional.add_argument('-g',"--germsdir", type=str, default=os.getcwd(), nargs='?',
                         help='directory for where to find germs.R for multivalency analysis eg. /Users/Bellinda/repos/germs [DEFAULT current directory]')
     parser._action_groups.append(optional)
@@ -79,8 +75,6 @@ def cli():
         args.maxenh,
         args.minsil,
         args.multivalency,
-        args.usescores,
-        args.unstranded,
         args.germsdir
         )
 
@@ -103,34 +97,13 @@ def get_ss_bed(df, pos_col, neg_col):
 
     return ss
 
-def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label, usescores, unstranded):
+def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
     """Return coverage of xl_bed items around df features extended by windows"""
     df = df.loc[df.name != "."]
     xl_bed = pbt.BedTool(xl_bed).sort()
-    pbt_df = pbt.BedTool.from_dataframe(df[['chr', 'start', 'end', 'name', 'score', 'strand']]).sort().slop(l=window, r=window, s=True, g=fai) 
-
-    if usescores:
-        # Sliding a window of size 1 nucleotide across each region
-        nucleotide_windows = pbt_df.window_maker(w=1, b=pbt_df, i='srcwinnum').sort()
-
-        # Mapping scores from xl_bed to these 1 nucleotide windows
-        if unstranded:
-            df_coverage = nucleotide_windows.map(b=xl_bed, c=5, o='sum', **{'sorted': True, 's': False, 'nonamecheck': True}).to_dataframe()
-            df_coverage.rename(columns={'thickStart': 'position', 'thickEnd': 'coverage'}, inplace=True)
-        else:
-            df_coverage = nucleotide_windows.map(b=xl_bed, c=5, o='sum', **{'sorted': True, 's': True, 'nonamecheck': True}).to_dataframe()
-            df_coverage.rename(columns={'thickStart': 'position', 'thickEnd': 'coverage'}, inplace=True)
-
-        # Ensure coverage column is numeric and fill NaNs with 0
-        df_coverage['coverage'] = pd.to_numeric(df_coverage['coverage'], errors='coerce').fillna(0)
-
-    else:
-        if unstranded:   
-            df_coverage = pbt_df.coverage(b=xl_bed, **{'sorted': True, 's': False, 'd': True, 'nonamecheck': True}).to_dataframe()[['thickStart', 'thickEnd', 'strand', 'name']]
-            df_coverage.rename(columns=({'thickStart':'position','thickEnd':'coverage'}), inplace=True)
-        else:
-            df_coverage = pbt_df.coverage(b=xl_bed, **{'sorted': True, 's': True, 'd': True, 'nonamecheck': True}).to_dataframe()[['thickStart', 'thickEnd', 'strand', 'name']]
-            df_coverage.rename(columns=({'thickStart':'position','thickEnd':'coverage'}), inplace=True)
+    pbt_df = pbt.BedTool.from_dataframe(df[['chr', 'start', 'end', 'name', 'score', 'strand']]).sort().slop(l=window, r=window, s=True, g=fai)    
+    df_coverage = pbt_df.coverage(b=xl_bed, **{'sorted': True, 's': True, 'd': True, 'nonamecheck': True}).to_dataframe()[['thickStart', 'thickEnd', 'strand', 'name']]
+    df_coverage.rename(columns=({'thickStart':'position','thickEnd':'coverage'}), inplace=True)
 
     df_plot = df_coverage
     
@@ -222,7 +195,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     return mdf,top_kmers_df
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, usescores, unstranded
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir
        #n_exons = 150, n_samples = 300, z_test=False
        ):
     name = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
@@ -318,12 +291,12 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','upstreamES')
 
         if xl_bed is not None:
-            middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss', usescores, unstranded)
-            middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss', usescores, unstranded)
-            downstream_3ss = get_coverage_plot(xl_bed, downstream_3ss_bed, fai, window, exon_categories, 'downstream_3ss', usescores, unstranded)
-            downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss', usescores, unstranded)
-            upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss', usescores, unstranded)
-            upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss', usescores, unstranded)
+            middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
+            middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss')
+            downstream_3ss = get_coverage_plot(xl_bed, downstream_3ss_bed, fai, window, exon_categories, 'downstream_3ss')
+            downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss')
+            upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
+            upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss')
 
 
             plotting_df = pd.concat([middle_3ss, middle_5ss, downstream_3ss, downstream_5ss, upstream_3ss, upstream_5ss])
@@ -1068,11 +1041,8 @@ if __name__=='__main__':
         max_enh,
         min_sil,
         multivalency,
-        usescores,
-        unstranded,
         germsdir
     ) = cli()
     
     run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, usescores, unstranded, germsdir)
-
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir)
