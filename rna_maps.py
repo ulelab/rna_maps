@@ -16,6 +16,55 @@ import os
 import argparse
 import random
 import string
+import logging
+import datetime
+import time
+
+def setup_logging(output_path):
+    """Sets up logging to file and console, and returns the log filename + start time."""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"execution_{timestamp}.log"
+    log_path = os.path.join(output_path, log_filename)
+
+    # Get root logger and reset handlers to avoid duplicates
+    logger = logging.getLogger()
+    logger.handlers.clear()
+    logger.setLevel(logging.INFO)
+
+    # Create file handler
+    file_handler = logging.FileHandler(log_path, mode='w')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+    # Create stream handler (console output)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+    # Add handlers
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+
+    # Ensure file writes are flushed automatically
+    file_handler.flush = file_handler.stream.flush
+
+    # Capture start time
+    start_time = time.time()
+
+    logger.info(f"Starting script execution at {timestamp}")
+
+    return log_filename, start_time, logger
+
+def log_runtime(start_time, logger):
+    """Logs the script execution time in minutes and seconds format."""
+    end_time = time.time()
+    total_seconds = int(end_time - start_time)
+
+    minutes, seconds = divmod(total_seconds, 60)
+    runtime_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+
+    # Ensure log is written immediately
+    logger.info(f"Script completed in {runtime_str}.")
+    for handler in logger.handlers:
+        handler.flush()
 
 sns.set_style("whitegrid", {'legend.frameon':True})
 
@@ -58,7 +107,8 @@ def cli():
                         help='directory for where to find germs.R for multivalency analysis eg. /Users/Bellinda/repos/germs [DEFAULT current directory]')
     parser._action_groups.append(optional)
     args = parser.parse_args()
-    print(args)
+
+    logging.info(args)
 
     return(
         args.inputsplice,
@@ -148,11 +198,11 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     df.columns = ['chr', 'start', 'stop', 'name', 'score', 'strand']
     df['name'] = df['name'].apply(lambda x: (str(x) + "XX" + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase))  + random.choice(list(string.ascii_lowercase)) + random.choice(list(string.ascii_lowercase))))
     pbt_df = pbt.BedTool.from_dataframe(df[['chr', 'start', 'stop', 'name', 'score', 'strand']]).sort().slop(l=2*window, r=2*window, s=True, g=fai)
-    print("Number of sites: " + str(len(pbt_df)))
+    logging.info("Number of sites: " + str(len(pbt_df)))
     pbts = pbt.BedTool.filter(pbt_df, lambda x: len(x) == (4*window) + 1).saveas()
-    print("Number of seqs considered after filtering those that run off the end of chroms: " + str(len(pbts)))
+    logging.info("Number of seqs considered after filtering those that run off the end of chroms: " + str(len(pbts)))
     pbts.sequence(fi=genome_fasta,name=True).save_seqs(f'{output_dir}/{name}_{type}_temp.fa')
-    print("Running germs to calculate multivalency scores...")
+    logging.info("Running germs to calculate multivalency scores...")
 
     os.system("RScript --vanilla " + germsdir + "/germs.R -f " + f'{output_dir}/{name}_{type}_temp.fa' + " -w 100 -s 20")
     os.system("gunzip -f *multivalency.tsv.gz")
@@ -237,18 +287,17 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         exon_categories = df_rmats.groupby('category').size()
         #exon_categories.columns = ["name", "exon_number"]
-        # logging info
-        print("Exons in each category:")
-        print(exon_categories)
-        print("Total categorised deduplicated exons: ", str(df_rmats.shape[0]))
+        logging.info("Exons in each category:")
+        logging.info(exon_categories)
+        logging.info("Total categorised deduplicated exons: " + str(df_rmats.shape[0]))
 
         ### Some warning messages ###
         if exon_categories.loc["control"] == 0:
-            print("Warning! There are no control exons. Try changing thresholds or input file and run again.")
+            logging.info("Warning! There are no control exons. Try changing thresholds or input file and run again.")
             sys.exit()
         
         if exon_categories.loc["enhanced"] == 0 and exon_categories.loc["silenced"] == 0:
-            print('Warning! There are no regulated exons, try changing filtering parameters or file and run again.')
+            logging.info('Warning! There are no regulated exons, try changing filtering parameters or file and run again.')
             sys.exit()
 
         ####### Exon lengths #######
@@ -1044,5 +1093,19 @@ if __name__=='__main__':
         germsdir
     ) = cli()
     
-    run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir)
+    log_filename, start_time, logger = setup_logging(output_folder)
+    logging.info(f"Log file created: {log_filename}")
+
+    try:
+        run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
+            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir)
+    finally:
+        # Log runtime at the end
+        log_runtime(start_time, logger)
+        
+        # Explicitly flush logs before shutting down
+        for handler in logger.handlers:
+            handler.flush()
+
+        # Now safe to shut down logging
+        logging.shutdown()

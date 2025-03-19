@@ -14,3 +14,4 @@ khsrp
 *.qmd
 *bedgraph*
 *.idx
+*log
