@@ -103,6 +103,8 @@ def cli():
     optional.add_argument('-ms',"--minsil", type=float, default=0.05, nargs='?',
                         help='minimum inclusion for exons to be considered silenced [DEFAULT 0.05]')
     optional.add_argument('-v','--multivalency', action="store_true")
+    optional.add_argument('-nc','--no_constitutive', action="store_true", 
+                    help='Exclude constitutive category from the output')
     optional.add_argument('-g',"--germsdir", type=str, default=os.getcwd(), nargs='?',
                         help='directory for where to find germs.R for multivalency analysis eg. /Users/Bellinda/repos/germs [DEFAULT current directory]')
     parser._action_groups.append(optional)
@@ -125,7 +127,8 @@ def cli():
         args.maxenh,
         args.minsil,
         args.multivalency,
-        args.germsdir
+        args.germsdir,
+        args.no_constitutive
         )
 
 def df_apply(col_fn, *col_names):
@@ -189,7 +192,81 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
     df_plot['-log10pvalue_smoothed'] = df_plot['-log10pvalue'].rolling(smoothing, center=True, win_type="gaussian").mean(std=2)
 
     return df_plot
-        
+
+def set_legend_text(legend, exon_categories, original_counts=None):
+    """
+    Set the legend text with optional subset information.
+    
+    Parameters:
+    ----------
+    legend : matplotlib.legend.Legend
+        The legend object to modify
+    exon_categories : pandas.Series
+        Series containing category counts
+    original_counts : dict, optional
+        Dictionary with original counts before subsetting
+    """
+    # Convert exon_categories to a DataFrame for easier handling
+    exon_cat = pd.DataFrame({'name': exon_categories.index, 'number_exons': exon_categories.values})
+    
+    # Determine which categories are present
+    categories = exon_cat['name'].unique()
+    legend.set_bbox_to_anchor([1.08, 0.75])
+    legend.set_title("")
+    
+    # Track index in legend texts
+    legend_idx = 0
+    
+    # Set text for each category in a specific order
+    for category in ['constituitive', 'control', 'enhanced', 'silenced']:
+        if category in categories:
+            count = exon_cat[exon_cat['name'] == category]['number_exons'].values[0]
+            text = f"{category.capitalize()} ({count}"
+            
+            # Add subset information if applicable
+            if original_counts and category in original_counts:
+                orig_count = original_counts[category]
+                if orig_count > count:
+                    text += f", subset from {orig_count}"
+            
+            text += ")"
+            legend.texts[legend_idx].set_text(text)
+            legend_idx += 1       
+
+def add_enrichment_marker(fig, ax):
+    """
+    Add text-based enrichment/depletion marker with arrows on the right side of the figure,
+    centered around y=0, dynamically accounting for the position of y=0.
+    """
+    # Get the y-axis limits of the current plot (ax)
+    y_min, y_max = ax.get_ylim()
+    
+    # Position of y=0 relative to the y-axis
+    y_zero_position = 0  # We're centering around y=0, no matter where it is on the y-axis
+    
+    # Calculate the height and position of the marker axis
+    marker_height = 0.4  # Adjust this based on your plot, it defines how tall the marker is
+    
+    # Calculate the normalized position of the marker to be centered around y=0
+    normalized_bottom = (y_zero_position - y_min) / (y_max - y_min) - marker_height / 2
+    
+    # Create a new axis on the right side of the figure
+    marker_ax = fig.add_axes([0.94, normalized_bottom, 0.06, marker_height], label=f"enrichment_marker_{ax.get_title()}")
+    
+    # Remove all axis elements
+    marker_ax.set_xticks([])
+    marker_ax.set_yticks([])
+    for spine in marker_ax.spines.values():
+        spine.set_visible(False)
+    
+    # Position the arrows with text centered at the middle of the marker
+    marker_ax.text(0.5, 0.5, "↑\nenriched\n\n\n↓\ndepleted",
+                   ha='center', va='center', fontsize=11, 
+                   transform=marker_ax.transAxes)
+    
+    return marker_ax
+
+
 
 def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, type, germsdir):
     """Return multivalency scores around df features extended by windows"""
@@ -245,7 +322,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     return mdf,top_kmers_df
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive
        #n_exons = 150, n_samples = 300, z_test=False
        ):
     name = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
@@ -270,16 +347,21 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
 
         # then apply hierarchy to decide which category exons belong to
-        conditions = [
-            (df_rmats["dPSI"].gt(min_sil) & df_rmats["FDR"].lt(max_fdr)), # silenced
-            (df_rmats["dPSI"].lt(max_enh) & df_rmats["FDR"].lt(max_fdr)), # enhanced
-            (df_rmats["dPSI"].gt(min_sil)), # silenced rest
-            (df_rmats["dPSI"].lt(max_enh)), # enhanced rest
-            (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl) & df_rmats["maxPSI"].gt(max_inclusion)), # constituitive
-            (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl))# control
-        ]
-
-        choices = ["silenced", "enhanced", "silenced_rest", "enhanced_rest", "constituitive", "control"]
+        if no_constitutive:
+            conditions = [
+                (df_rmats["dPSI"].gt(min_sil) & df_rmats["FDR"].lt(max_fdr)), # silenced
+                (df_rmats["dPSI"].lt(max_enh) & df_rmats["FDR"].lt(max_fdr)), # enhanced
+                (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl))# control
+            ]
+            choices = ["silenced", "enhanced", "control"]
+        else:
+            conditions = [
+                (df_rmats["dPSI"].gt(min_sil) & df_rmats["FDR"].lt(max_fdr)), # silenced
+                (df_rmats["dPSI"].lt(max_enh) & df_rmats["FDR"].lt(max_fdr)), # enhanced
+                (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl) & df_rmats["maxPSI"].gt(max_inclusion)), # constituitive
+                (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl))# control
+            ]
+            choices = ["silenced", "enhanced", "constituitive", "control"]
 
         df_rmats["category"] = np.select(conditions, choices, default=None)
 
@@ -299,6 +381,45 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         if exon_categories.loc["enhanced"] == 0 and exon_categories.loc["silenced"] == 0:
             logging.info('Warning! There are no regulated exons, try changing filtering parameters or file and run again.')
             sys.exit()
+        
+        # Apply subsetting for the plotting
+        # Get the count of each category
+        category_counts = df_rmats['category'].value_counts()
+        # Store original counts
+        original_counts = {cat: count for cat, count in category_counts.items()}
+    
+        # Find the maximum count of enhanced or silenced
+        target_count = 0
+        if 'enhanced' in category_counts and 'silenced' in category_counts:
+            target_count = max(category_counts['enhanced'], category_counts['silenced'])
+        elif 'enhanced' in category_counts:
+            target_count = category_counts['enhanced']
+        elif 'silenced' in category_counts:
+            target_count = category_counts['silenced']
+    
+        # Subset control exons
+        if 'control' in category_counts and category_counts['control'] > target_count > 0:
+            control_indices = df_rmats[df_rmats['category'] == 'control'].index
+            # Randomly select indices to keep
+            control_indices_to_keep = np.random.choice(control_indices, target_count, replace=False)
+            # Create a mask for rows to drop
+            drop_mask = df_rmats.index.isin(control_indices) & ~df_rmats.index.isin(control_indices_to_keep)
+            # Drop the rows
+            df_rmats = df_rmats[~drop_mask]
+            logging.info(f"Randomly subsetted control exons from {category_counts['control']} to {target_count}")
+    
+        # Subset constitutive exons if they exist and not excluded
+        if not no_constitutive and 'constituitive' in category_counts and category_counts['constituitive'] > target_count > 0:
+            const_indices = df_rmats[df_rmats['category'] == 'constituitive'].index
+            # Randomly select indices to keep
+            const_indices_to_keep = np.random.choice(const_indices, target_count, replace=False)
+            # Create a mask for rows to drop
+            drop_mask = df_rmats.index.isin(const_indices) & ~df_rmats.index.isin(const_indices_to_keep)
+            # Drop the rows
+            df_rmats = df_rmats[~drop_mask]
+            logging.info(f"Randomly subsetted constitutive exons from {category_counts['constituitive']} to {target_count}")
+
+        exon_categories = df_rmats.groupby('category').size()
 
         ####### Exon lengths #######
         df_rmats["regulated_exon_length"] = df_rmats['exonEnd'] - df_rmats['exonStart_0base']
@@ -360,24 +481,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
             for ax, title in zip(g.axes.flat, titles):
                 ax.set_title(title)
+                ax.axhline(y=0, color='k', alpha=0.2, linewidth=0.5)
+                fig = plt.gcf()
+                marker_ax = add_enrichment_marker(fig, ax) 
+
             g.set(xlabel='')
             g.axes[0].set_ylabel('-log10(p value) enrichment / control')
+
+            sns.move_legend(
+                g, "upper right",  # Position: 'upper left' relative to bbox
+                bbox_to_anchor=(1, 2),  # Outside the plot area to the right
+                ncol=1,  # Number of columns in the legend
+                title=None,  # Set title if needed
+                frameon=False  # Remove frame around the legend
+            )
             leg = g._legend
-            leg.set_bbox_to_anchor([1.04,0.75])
-            leg.set_title("")
-            exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
-            if len(exon_cat[exon_cat['name']=="enhanced_rest"].index) != 0 :
-                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
-                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
-                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
-                leg.texts[4].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
-                leg.texts[3].set_text("Enhanced Rest (" + str(exon_cat[exon_cat['name']=="enhanced_rest"]["number_exons"].values[0]) + ")")
-                leg.texts[5].set_text("Silenced Rest (" + str(exon_cat[exon_cat['name']=="silenced_rest"]["number_exons"].values[0]) + ")")
-            else:
-                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
-                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
-                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
-                leg.texts[3].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
+            set_legend_text(leg, exon_categories, original_counts)
 
 			
             ### Add exon-intron drawing below line plots ###
@@ -529,11 +648,12 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
 
-            plt.subplots_adjust(wspace=0.01)
+            # Adjust subplot spacing and save with enough room for legend and arrows
+            plt.subplots_adjust(wspace=0.05)  
             plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf', 
-                bbox_extra_artists=([leg,rect]),
-                bbox_inches='tight',
-                pad_inches=0.5)
+                    bbox_extra_artists=([leg, rect, marker_ax]),
+                    bbox_inches='tight',
+                    pad_inches=0.8)
             pbt.helpers.cleanup()
 
         if multivalency:
@@ -561,21 +681,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             g.set(xlabel='')
             g.axes[0].set_ylabel('mean smoothed kmer multivalency')
             leg = g._legend
-            leg.set_bbox_to_anchor([1.04,0.75])
-            leg.set_title("")
-            exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
-            if len(exon_cat[exon_cat['name']=="enhanced_rest"].index) != 0 :
-                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
-                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
-                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
-                leg.texts[4].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
-                leg.texts[3].set_text("Enhanced Rest (" + str(exon_cat[exon_cat['name']=="enhanced_rest"]["number_exons"].values[0]) + ")")
-                leg.texts[5].set_text("Silenced Rest (" + str(exon_cat[exon_cat['name']=="silenced_rest"]["number_exons"].values[0]) + ")")
-            else:
-                leg.texts[0].set_text("Constituitive (" + str(exon_cat[exon_cat['name']=="constituitive"]["number_exons"].values[0]) + ")")
-                leg.texts[1].set_text("Control (" + str(exon_cat[exon_cat['name']=="control"]["number_exons"].values[0]) + ")")
-                leg.texts[2].set_text("Enhanced (" + str(exon_cat[exon_cat['name']=="enhanced"]["number_exons"].values[0]) + ")")
-                leg.texts[3].set_text("Silenced (" + str(exon_cat[exon_cat['name']=="silenced"]["number_exons"].values[0]) + ")")
+            set_legend_text(leg, exon_categories, original_counts)
 
             ax = g.axes[0]
             ax.set_xlim([window, (2*window)+50])
@@ -752,8 +858,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             g.set(xlabel='')
             g.axes[0].set_ylabel('mean smoothed kmer multivalency')
             leg = g._legend
-            leg.set_bbox_to_anchor([1.04,0.75])
-            leg.set_title("")
+            set_legend_text(leg, exon_categories, original_counts)
 
             ax = g.axes[0]
             ax.set_xlim([window, (2*window)+50])
@@ -917,9 +1022,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             g.set(xlabel='')
             g.axes[0].set_ylabel('mean smoothed kmer multivalency')
             leg = g._legend
-            leg.set_bbox_to_anchor([1.04,0.75])
-            leg.set_title("")
-
+            set_legend_text(leg, exon_categories, original_counts)
             ax = g.axes[0]
             ax.set_xlim([window, (2*window)+50])
             ax.set_ylim(ymin=1)
@@ -1090,7 +1193,8 @@ if __name__=='__main__':
         max_enh,
         min_sil,
         multivalency,
-        germsdir
+        germsdir,
+        no_constitutive
     ) = cli()
     
     log_filename, start_time, logger = setup_logging(output_folder)
@@ -1098,7 +1202,7 @@ if __name__=='__main__':
 
     try:
         run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir)
+            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive)
     finally:
         # Log runtime at the end
         log_runtime(start_time, logger)

@@ -3,13 +3,9 @@ cirbp-rbm3
 ford23
 khsrp
 *.pdf
-
 *.tsv
-
 *.bed
-
 *.txt
-
 *.png
 *.qmd
 *bedgraph*
