@@ -3,6 +3,11 @@ import matplotlib.ticker as mticker
 matplotlib.use('Agg')
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.gridspec import GridSpec
+from matplotlib import colormaps
+
+from scipy.ndimage import gaussian_filter1d
 
 from matplotlib.lines import Line2D
 import pandas as pd
@@ -19,6 +24,50 @@ import string
 import logging
 import datetime
 import time
+
+def smooth_coverage(df, window_size=10, std=2):
+    # Create a copy of the dataframe to avoid modifying the original
+    result = df.copy()
+    
+    # Process each unique exon_id and label combination
+    groups = []
+    for (exon_id, label), group_df in result.groupby(['exon_id', 'label']):
+        # Skip if too few points to smooth
+        if len(group_df) < 3:
+            groups.append(group_df)
+            continue
+        
+        # Sort by position for rolling window
+        group_sorted = group_df.sort_values('position')
+        
+        # Apply smoothing only if we have enough points
+        if len(group_sorted) >= window_size:
+            # Get coverage values
+            values = group_sorted['coverage'].values
+            
+            # Create a Series with integer indices (not the DataFrame indices)
+            # This ensures clean math without index alignment issues
+            s = pd.Series(values)
+            
+            # Apply rolling window
+            smoothed = s.rolling(
+                window=window_size,
+                center=True,
+                win_type='gaussian'
+            ).mean(std=std)
+            
+            # Fill NaN values at the edges with original values
+            smoothed = smoothed.fillna(s)
+            
+            # Update the coverage in the original group
+            # This works because the sorted indices correspond to the smoothed series
+            group_sorted['coverage'] = smoothed.values
+        
+        # Add the processed group to our list
+        groups.append(group_sorted)
+    
+    # Combine all groups back into a single DataFrame
+    return pd.concat(groups)
 
 def setup_logging(output_path):
     """Sets up logging to file and console, and returns the log filename + start time."""
@@ -138,11 +187,13 @@ def df_apply(col_fn, *col_names):
     return inner_fn
 
 def get_ss_bed(df, pos_col, neg_col):
-    ss_pos = df.loc[df['strand'] == "+", ['chr', pos_col, pos_col, 'category', 'FDR', 'strand']]
+    df['exon_id'] = df['category'] + "_" + df['chr'].astype(str) + ":" + df['exonStart_0base'].astype(str) + "-" + df['exonEnd'].astype(str) + ";" + df['strand'].astype(str)
+
+    ss_pos = df.loc[df['strand'] == "+", ['chr', pos_col, pos_col, 'exon_id', 'FDR', 'strand']]
     ss_pos.columns = ['chr', 'start', 'end', 'name', 'score', 'strand']
     ss_pos.start = ss_pos.start.transform(lambda x: x-1)
 
-    ss_n = df.loc[df['strand'] == "-", ['chr', neg_col, neg_col, 'category', 'FDR', 'strand']]
+    ss_n = df.loc[df['strand'] == "-", ['chr', neg_col, neg_col, 'exon_id', 'FDR', 'strand']]
     ss_n.columns = ['chr', 'start', 'end', 'name', 'score', 'strand']
     ss_n.end = ss_n.end.transform(lambda x: x+1)
 
@@ -164,8 +215,14 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
     df_plot.loc[df_plot.strand=='-', 'position'] = abs(2 * window + 2 - df_plot['position'])
 
     df_plot = df_plot.loc[df_plot.name != "."]
-    df_plot = df_plot.groupby(['name','position'], as_index=False).agg({'coverage':'sum'})
 
+    df_plot =df_plot.join( df_plot.pop('name').str.split('_',n=1,expand=True).rename(columns={0:'name', 1:'exon_id'}) )
+
+    heatmap_plot = df_plot
+    heatmap_plot['label'] = label
+
+    df_plot = df_plot.groupby(['name','position'], as_index=False).agg({'coverage':'sum'})
+    
     exon_cat = pd.DataFrame({'name':exon_categories.index, 'number_exons':exon_categories.values})
     df_plot = df_plot.merge(exon_cat, how="left")
 
@@ -188,10 +245,9 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
     df_plot['label'] = label
 
     df_plot.loc[df_plot['fold_change'] < 1, ['-log10pvalue']] = df_plot['-log10pvalue'] * -1
-
     df_plot['-log10pvalue_smoothed'] = df_plot['-log10pvalue'].rolling(smoothing, center=True, win_type="gaussian").mean(std=2)
 
-    return df_plot
+    return df_plot, heatmap_plot
 
 def set_legend_text(legend, exon_categories, original_counts=None):
     """
@@ -325,7 +381,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive
        #n_exons = 150, n_samples = 300, z_test=False
        ):
-    name = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
+    FILEname = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
     df_fai = pd.read_csv(fai, sep='\t', header=None)
     chroms = set(df_fai[0].values)
     rmats = pd.read_csv(de_file, sep='\t')
@@ -365,7 +421,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         df_rmats["category"] = np.select(conditions, choices, default=None)
 
-        df_rmats.to_csv(f'{output_dir}/{name}_RMATS_with_categories.tsv', sep="\t")
+        df_rmats.to_csv(f'{output_dir}/{FILEname}_RMATS_with_categories.tsv', sep="\t")
 
         exon_categories = df_rmats.groupby('category').size()
         #exon_categories.columns = ["name", "exon_number"]
@@ -447,7 +503,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         g.set(xlabel=None)
         g.axes[0].set_ylabel('Exon length (bp)')
         plt.tight_layout()
-        plt.savefig(f'{output_dir}/{name}_exon_length.pdf')
+        plt.savefig(f'{output_dir}/{FILEname}_exon_length.pdf')
         pbt.helpers.cleanup()
 
 
@@ -468,10 +524,235 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
             upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss')
 
+            linegraph_middle_3ss = middle_3ss[0]
+            linegraph_middle_5ss = middle_5ss[0]
+            linegraph_downstream_3ss = downstream_3ss[0]
+            linegraph_downstream_5ss = downstream_5ss[0]
+            linegraph_upstream_3ss = upstream_3ss[0]
+            linegraph_upstream_5ss = upstream_5ss[0]
 
-            plotting_df = pd.concat([middle_3ss, middle_5ss, downstream_3ss, downstream_5ss, upstream_3ss, upstream_5ss])
-            plotting_df.to_csv(f'{output_dir}/{name}_RNAmap.tsv', sep="\t")
+            heatmap_middle_3ss = middle_3ss[1]
+            heatmap_middle_5ss = middle_5ss[1]
+            heatmap_downstream_3ss = downstream_3ss[1]
+            heatmap_downstream_5ss = downstream_5ss[1]
+            heatmap_upstream_3ss = upstream_3ss[1]
+            heatmap_upstream_5ss = upstream_5ss[1]
 
+            plotting_df = pd.concat([linegraph_middle_3ss, linegraph_middle_5ss, linegraph_downstream_3ss, linegraph_downstream_5ss, linegraph_upstream_3ss, linegraph_upstream_5ss])
+            plotting_df.to_csv(f'{output_dir}/{FILEname}_RNAmap.tsv', sep="\t")
+
+            # Trying out the heatmap
+            heat_df = pd.concat([heatmap_middle_3ss, heatmap_middle_5ss, heatmap_downstream_3ss, heatmap_downstream_5ss, heatmap_upstream_3ss, heatmap_upstream_5ss])
+
+            # Step 1: Ensure coverage is binary (0 or 1)
+            df = heat_df.copy()
+            df['coverage'] = (df['coverage'] > 0).astype(int)
+            df = smooth_coverage(df)
+            
+            labels = ['upstream_3ss', 'upstream_5ss', 'middle_3ss', 'middle_5ss', 'downstream_3ss', 'downstream_5ss']
+                
+            # Step 2: Calculate total signal for each exon across ALL regions
+            exon_totals = df.groupby('exon_id')['coverage'].sum().reset_index()
+            exon_totals.columns = ['exon_id', 'total_signal']
+                
+            # Step 3: Remove exons with no signal across all regions
+            exons_with_signal = exon_totals[exon_totals['total_signal'] > 0]['exon_id']
+            df = df[df['exon_id'].isin(exons_with_signal)]
+                
+            # Step 4: Get name for each exon - keep as Series with exon_id as index
+            exon_names = df[['exon_id', 'name']].drop_duplicates().set_index('exon_id')['name']
+                
+            #  Step 5: Create dictionary to store data for each label
+            label_data = {}
+                
+            # Process each label
+            for label in labels:
+                label_df = df[df['label'] == label]
+                # Skip if no data for this label
+                if len(label_df) == 0:
+                    print(f"No data for label: {label}")
+                    continue
+                    
+                # Create pivot table for this label - keep exon_id as index
+                pivot = label_df.pivot_table(
+                    index='exon_id',
+                    columns='position',
+                    values='coverage',
+                    fill_value=0
+                )
+                    
+                # Add to dictionary
+                label_data[label] = pivot
+                
+            # Step 6: Get common exon_ids across all labels with data
+            common_exons = set()
+            first = True
+                
+            for label, pivot in label_data.items():
+                if first:
+                    common_exons = set(pivot.index)
+                    first = False
+                else:
+                    common_exons = common_exons.union(set(pivot.index))
+                
+            # Step 7: Get names and total signal for common exons
+            # Create DataFrame with exon_id and total_signal - keep exon_id as index
+            exon_info = exon_totals.set_index('exon_id').loc[list(common_exons)]
+                
+            # Add name information
+            exon_info['name'] = exon_names.loc[exon_info.index]
+                
+            # Step 8: Sort exons - first by name, then by total signal (descending)
+            exon_info = exon_info.sort_values(['name', 'total_signal'], ascending=[True, False])
+                
+            # Get the sorted exon IDs
+            sorted_exon_ids = exon_info.index.tolist()
+                
+            # Step 9: Set up the figure
+            width = max(15, len(labels) * 4)
+            height = max(5, len(sorted_exon_ids) * 0.08)
+            figsize = (width, height)
+                
+            fig = plt.figure(figsize=figsize)
+            fig.patch.set_alpha(0.0)  # Make figure background fully transparent
+                
+            # Create grid for the subplots
+            gs = GridSpec(1, len(labels) + 1, width_ratios=[1] + [3] * len(labels), figure=fig)
+                
+            # Create the name labels column
+            ax_names = fig.add_subplot(gs[0, 0])
+            ax_names.patch.set_alpha(0.0)  # Make axis background transparent
+
+            # Step 10: Plot name groups and labels
+            # Get names in the sorted order
+            names = exon_info['name'].values
+                
+            # Create a color-coded name column
+            name_colors = {}
+            unique_names = sorted(set(names))
+            color_palette = plt.cm.tab10.colors[:len(unique_names)]
+            for i, name in enumerate(unique_names):
+                name_colors[name] = color_palette[i]
+                
+            # Create name matrix for display
+            name_matrix = np.zeros((len(sorted_exon_ids), 1))
+            name_cmap = LinearSegmentedColormap.from_list('name_cmap', 
+                                                            [(1, 1, 1)] + list(color_palette), 
+                                                            N=len(unique_names) + 1)
+                
+            for i, name in enumerate(names):
+                name_matrix[i, 0] = unique_names.index(name) + 1
+                
+            # Plot name matrix
+            sns.heatmap(name_matrix, ax=ax_names, cmap=name_cmap, cbar=False, linewidths=0, rasterized=True)
+                
+            # Add name labels
+            name_groups = {}
+            current_name = None
+            start_idx = 0
+                
+            for i, name in enumerate(names):
+                if name != current_name:
+                    if current_name is not None:
+                        name_groups[current_name] = (start_idx, i - 1)
+                    current_name = name
+                    start_idx = i
+                
+            # Add the last group
+            if current_name is not None:
+                name_groups[current_name] = (start_idx, len(names) - 1)
+                
+            # Add text labels for each name group
+            for name, (start, end) in name_groups.items():
+                middle = (start + end) / 2
+                ax_names.text(0.5, middle, name, 
+                            fontsize=10, fontweight='bold', ha='center', va='center',
+                            color='black')
+                
+            # Format the name axis
+            ax_names.set_title('Name')
+            ax_names.set_xticks([])
+            ax_names.set_yticks([])
+            ax.yaxis.set_visible(False)
+                
+            # Step 11: Plot each region in a separate subplot
+            for i, label in enumerate(labels):
+                if label not in label_data:
+                    # Create empty subplot if no data
+                    ax = fig.add_subplot(gs[0, i + 1])
+                    ax.set_facecolor('none') 
+                    ax.text(0.5, 0.5, f"No data for {label}", ha='center', va='center')
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.set_title(label)
+                    continue
+                    
+                # Get data for this label
+                pivot = label_data[label]
+                    
+                # Get position columns
+                position_cols = sorted(pivot.columns)
+                    
+                # Create matrix for display (with rows in the correct order)
+                display_matrix = np.zeros((len(sorted_exon_ids), len(position_cols)))
+                    
+                # Fill the matrix for exons that have data for this label
+                for j, exon_id in enumerate(sorted_exon_ids):
+                    if exon_id in pivot.index:
+                        for k, pos in enumerate(position_cols):
+                            if pos in pivot.columns:
+                                display_matrix[j, k] = pivot.loc[exon_id, pos]
+                    
+                # Create the heatmap for this label
+                ax = fig.add_subplot(gs[0, i + 1])
+                ax.set_facecolor('none') 
+                sns.heatmap(display_matrix, ax=ax, cmap=colormaps['viridis'], cbar=False, linewidths=0, rasterized=True)
+                # Apply rasterization to the specific artist
+                # Find the right collection (typically the first one)
+                # if len(ax.collections) > 0:
+                #     ax.collections[0].set_rasterized(True)
+                    
+                # Format the axis
+                ax.set_title(label)
+                    
+                # Only show x-ticks for positions if there aren't too many
+                if len(position_cols) <= 10:
+                    ax.set_xticks(np.arange(len(position_cols)) + 0.5)
+                    ax.set_xticklabels(position_cols, rotation=45)
+                else:
+                    # Show a subset of position labels to avoid overcrowding
+                    step = max(1, len(position_cols) // 5)
+                    ax.set_xticks(np.arange(0, len(position_cols), step) + 0.5)
+                    ax.set_xticklabels([position_cols[i] for i in range(0, len(position_cols), step)], rotation=45)
+                    
+                # Only show y-ticks for the first label to avoid redundancy
+                ax.set_yticks([])
+                    
+                # Add horizontal lines to separate different name groups
+                for name, (start, end) in name_groups.items():
+                    if end < len(sorted_exon_ids) - 1:  # Don't add a line after the last group
+                        ax.axhline(y=end + 1, color='black', linewidth=1, alpha=0.7)
+                
+            # Step 12: Add overall title and legend
+            plt.suptitle('CLIP coverage heatmap', fontsize=16)
+                
+            # Add a legend for the count of exons in each group
+            legend_text = []
+            for name, (start, end) in name_groups.items():
+                count = end - start + 1
+                legend_text.append(f"{name}: {count} exons")
+                
+            plt.figtext(0.98, 0.5, '\n'.join(legend_text), 
+                    va='center', ha='right', fontsize=10,
+                    bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
+                
+            plt.tight_layout(rect=[0, 0, 0.95, 0.95])
+                
+            # Save the figure if requested
+            plt.savefig(f'{output_dir}/{FILEname}_heatmap.pdf', dpi=300, bbox_inches='tight')
+
+
+            # LINE GRAPH
             #sns.set(rc={'figure.figsize':(7, 5)})
             sns.set_style("whitegrid")
 
@@ -650,7 +931,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
             # Adjust subplot spacing and save with enough room for legend and arrows
             plt.subplots_adjust(wspace=0.05)  
-            plt.savefig(f'{output_dir}/{name}_RNAmap_-log10pvalue.pdf', 
+            plt.savefig(f'{output_dir}/{FILEname}_RNAmap_-log10pvalue.pdf', 
                     bbox_extra_artists=([leg, rect, marker_ax]),
                     bbox_inches='tight',
                     pad_inches=0.8)
@@ -828,7 +1109,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             plt.subplots_adjust(wspace=0.01)
-            plt.savefig(f'{output_dir}/{name}_RNAmap_multivalency.pdf',
+            plt.savefig(f'{output_dir}/{FILEname}_RNAmap_multivalency.pdf',
                 bbox_extra_artists=([leg,rect]),
                 bbox_inches='tight',
                 pad_inches=0.5)
@@ -1005,7 +1286,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             plt.subplots_adjust(wspace=0.01)
-            plt.savefig(f'{output_dir}/{name}_RNAmap_silencedKMER_multivalency.pdf',
+            plt.savefig(f'{output_dir}/{FILEname}_RNAmap_silencedKMER_multivalency.pdf',
                 bbox_extra_artists=([leg,rect]),
                 bbox_inches='tight',
                 pad_inches=0.5)
@@ -1168,7 +1449,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             plt.subplots_adjust(wspace=0.01)
-            plt.savefig(f'{output_dir}/{name}_RNAmap_enhancedKMER_multivalency.pdf',
+            plt.savefig(f'{output_dir}/{FILEname}_RNAmap_enhancedKMER_multivalency.pdf',
                 bbox_extra_artists=([leg,rect]),
                 bbox_inches='tight',
                 pad_inches=0.5)
