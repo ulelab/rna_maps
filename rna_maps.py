@@ -731,7 +731,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 # Add horizontal lines to separate different name groups
                 for name, (start, end) in name_groups.items():
                     if end < len(sorted_exon_ids) - 1:  # Don't add a line after the last group
-                        ax.axhline(y=end + 1, color='black', linewidth=1, alpha=0.7)
+                        ax.axhline(y=end + 1, color='white', linewidth=2, alpha=1)
                 
             # Step 12: Add overall title and legend
             plt.suptitle('CLIP coverage heatmap', fontsize=16)
