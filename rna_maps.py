@@ -97,6 +97,14 @@ def setup_logging(output_path):
 
     # Capture start time
     start_time = time.time()
+        # Set higher logging level for matplotlib (only show WARNING and above)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+    logging.getLogger('matplotlib.backends').setLevel(logging.ERROR)
+
+    # Also suppress fontTools logging (source of many of those messages)
+    logging.getLogger('fontTools').setLevel(logging.ERROR)
+    logging.getLogger('fontTools.subset').setLevel(logging.ERROR)
 
     logger.info(f"Starting script execution at {timestamp}")
 
@@ -344,11 +352,9 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     os.system(f'rm {output_dir}/{name}_{type}_temp.fa')
     mdf['position'] = np.tile(np.arange(0, 4*window - 3), len(pbts))
 
-    mdf[['label','roname']] = mdf['sequence_name'].str.split('XX',expand=True)
+    mdf[['exon_type','label','roname']] = mdf['sequence_name'].str.split(r'XX|_',expand=True)
 
     # GET MOST CONTRIBUTING KMERS
-    # Add 'exon_type' column by splitting 'sequence_name' on 'XX'
-    mdf['exon_type'] = mdf['sequence_name'].str.split('XX').str[0]
     # Filter for 'exon_type' being 'enhanced' or 'silenced'
     filtered_mdf = mdf[mdf['exon_type'].isin(['enhanced', 'silenced'])]
     # Separate dataframes for enhanced and silenced exon_types
@@ -366,14 +372,17 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     # Combine the top kmers for enhanced and silenced into one table
     top_kmers_df = pd.concat([top_kmers_enhanced, top_kmers_silenced])
 
-    mdf = mdf.groupby(['label','position'], as_index=False).agg({'smoothed_kmer_multivalency':'mean'})
-    top_kmers_df = top_kmers_df.groupby(['label','position','exon_type','kmer'], as_index=False).agg({'smoothed_kmer_multivalency':'mean'})
+    mdf = mdf.groupby(['exon_type','position'], as_index=False).agg({'smoothed_kmer_multivalency':'mean'}).reset_index()
+    top_kmers_df = top_kmers_df.groupby(['position','exon_type','kmer'], as_index=False).agg({'smoothed_kmer_multivalency':'mean'}).reset_index()
 
     mdf['type'] = type
     top_kmers_df['type'] = type
 
-    mdf = mdf.loc[(mdf.label != ".") & (pd.notnull(mdf.label)) & (mdf.label != "None")]
-    top_kmers_df = top_kmers_df.loc[(top_kmers_df.label != ".") & (pd.notnull(top_kmers_df.label)) & (top_kmers_df.label != "None")]
+    print(mdf.head())
+    print(top_kmers_df.head())
+
+    # mdf = mdf.loc[(mdf.label != ".") & (pd.notnull(mdf.label)) & (mdf.label != "None")]
+    # top_kmers_df = top_kmers_df.loc[(top_kmers_df.label != ".") & (pd.notnull(top_kmers_df.label)) & (top_kmers_df.label != "None")]
 
     return mdf,top_kmers_df
 
@@ -399,7 +408,9 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
    
         
         # to deduplicate, first select the most extreme dPSI value for every exon (keep ties, they will be resolved by the hierarchy)
-        df_rmats = df_rmats[df_rmats.groupby(['chr', 'exonStart_0base', 'exonEnd', 'strand'])['dPSI'].apply(lambda x: abs(x).rank(ascending=False) < 2)]
+        mask = df_rmats.groupby(['chr', 'exonStart_0base', 'exonEnd', 'strand'])['dPSI'] \
+                    .transform(lambda x: abs(x).rank(ascending=False)) < 2
+        df_rmats = df_rmats[mask]
 
 
         # then apply hierarchy to decide which category exons belong to
@@ -495,7 +506,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                     kind='box', col_wrap=3, showfliers=False,
                     col_order=["upstream_exon_length","regulated_exon_length","downstream_exon_length"],
                     order=["control","constituitive","enhanced","enhanced_rest","silenced","silenced_rest"],
-                    palette = palette_exon_len)
+                    palette = palette_exon_len, hue='category', legend=False)
         titles = ["Upstream Exon", "Middle Exon", "Downstream exon"]
         for ax, title in zip(g.axes.flat, titles):
             ax.set_title(title)
@@ -560,7 +571,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             df = df[df['exon_id'].isin(exons_with_signal)]
                 
             # Step 4: Get name for each exon - keep as Series with exon_id as index
-            exon_names = df[['exon_id', 'name']].drop_duplicates().set_index('exon_id')['name']
+            exon_names = df[['exon_id', 'name']].drop_duplicates(subset=['exon_id']).set_index('exon_id')['name']
                 
             #  Step 5: Create dictionary to store data for each label
             label_data = {}
@@ -610,7 +621,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 
             # Step 9: Set up the figure
             width = max(15, len(labels) * 4)
-            height = max(5, len(sorted_exon_ids) * 0.08)
+            height = max(3, len(sorted_exon_ids) * 0.002)
             figsize = (width, height)
                 
             fig = plt.figure(figsize=figsize)
@@ -692,7 +703,18 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                     
                 # Get position columns
                 position_cols = sorted(pivot.columns)
-                    
+                
+                # Set different position limits based on label
+                if '3ss' in label:
+                    min_pos = 0
+                    max_pos = window+50
+                else:
+                    min_pos = window-50
+                    max_pos = window*2
+                
+                # Filter position columns based on limits
+                position_cols = [pos for pos in position_cols if min_pos <= pos <= max_pos]
+
                 # Create matrix for display (with rows in the correct order)
                 display_matrix = np.zeros((len(sorted_exon_ids), len(position_cols)))
                     
@@ -715,15 +737,10 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 # Format the axis
                 ax.set_title(label)
                     
-                # Only show x-ticks for positions if there aren't too many
-                if len(position_cols) <= 10:
-                    ax.set_xticks(np.arange(len(position_cols)) + 0.5)
-                    ax.set_xticklabels(position_cols, rotation=45)
-                else:
-                    # Show a subset of position labels to avoid overcrowding
-                    step = max(1, len(position_cols) // 5)
-                    ax.set_xticks(np.arange(0, len(position_cols), step) + 0.5)
-                    ax.set_xticklabels([position_cols[i] for i in range(0, len(position_cols), step)], rotation=45)
+                # REMOVE X-AXIS LABELS COMPLETELY
+                ax.set_xticks([])  # Remove tick marks
+                ax.set_xticklabels([])  # Remove tick labels
+                ax.xaxis.set_visible(False)  # Completely hide x-axis
                     
                 # Only show y-ticks for the first label to avoid redundancy
                 ax.set_yticks([])
@@ -732,19 +749,6 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 for name, (start, end) in name_groups.items():
                     if end < len(sorted_exon_ids) - 1:  # Don't add a line after the last group
                         ax.axhline(y=end + 1, color='white', linewidth=2, alpha=1)
-                
-            # Step 12: Add overall title and legend
-            plt.suptitle('CLIP coverage heatmap', fontsize=16)
-                
-            # Add a legend for the count of exons in each group
-            legend_text = []
-            for name, (start, end) in name_groups.items():
-                count = end - start + 1
-                legend_text.append(f"{name}: {count} exons")
-                
-            plt.figtext(0.98, 0.5, '\n'.join(legend_text), 
-                    va='center', ha='right', fontsize=10,
-                    bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
                 
             plt.tight_layout(rect=[0, 0, 0.95, 0.95])
                 
@@ -785,14 +789,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             rect_fraction = 1 / ((window + 50) / 50)
 
             ax = g.axes[0]
-            ax.set_xlim([0, window+50])
-            a=ax.get_xticks().tolist()
-            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-            a = np.arange(0-window, 51, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            a[-1] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([0, window + 50])
+
+            # 1) Generate tick positions every 50 units from 0 to window+50
+            ticks = np.arange(0, window + 51, 50)
+
+            # 2) Generate labels by shifting positions by -window, blanking first/last
+            labels = [
+                "" if t in (ticks[0], ticks[-1])
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -808,14 +820,21 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[1]
-            ax.set_xlim([window-50, window*2])
-            a=ax.get_xticks().tolist()
-            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-            a = np.arange(-50,window + 1, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            a[-1] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window - 50, window * 2])
+
+            # 1) Generate tick positions every 50 units from window-50 up to 2*window
+            ticks = np.arange(window - 50, window * 2 + 1, 50)
+
+            # 2) Build labels by shifting each tick by -window, blanking the first/last
+            labels = [
+                "" if t in (ticks[0], ticks[-1])
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply them
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -834,14 +853,21 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[2]
-            ax.set_xlim([0, window+50])
-            a=ax.get_xticks().tolist()
-            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-            a = np.arange(0-window, 51, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            a[-1] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([0, window + 50])
+
+            # 1) Generate tick positions every 50 units from 0 to window+50
+            ticks = np.arange(0, window + 51, 50)
+
+            # 2) Generate labels by shifting positions by -window, blanking first/last
+            labels = [
+                "" if t in (ticks[0], ticks[-1])
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
                 color="midnightblue", alpha=1,
@@ -858,14 +884,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[3]
-            ax.set_xlim([window-50, window*2])
-            a=ax.get_xticks().tolist()
-            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-            a = np.arange(-50,window + 1, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            a[-1] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window - 50, window * 2])
+
+            # 1) Generate tick positions every 50 units from window-50 up to 2*window
+            ticks = np.arange(window - 50, window * 2 + 1, 50)
+
+            # 2) Build labels by shifting each tick by -window, blanking the first/last
+            labels = [
+                "" if t in (ticks[0], ticks[-1])
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply them
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="midnightblue", alpha=1,
@@ -882,14 +916,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[4]
-            ax.set_xlim([0, window+50])
-            a=ax.get_xticks().tolist()
-            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-            a = np.arange(0-window, 51, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            a[-1] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([0, window + 50])
+
+            # 1) Generate tick positions every 50 units from 0 to window+50
+            ticks = np.arange(0, window + 51, 50)
+
+            # 2) Generate labels by shifting positions by -window, blanking first/last
+            labels = [
+                "" if t in (ticks[0], ticks[-1])
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -905,14 +947,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[5]
-            ax.set_xlim([window-50, window*2])
-            a=ax.get_xticks().tolist()
-            ax.xaxis.set_major_locator(mticker.FixedLocator(a))
-            a = np.arange(-50,window + 1, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            a[-1] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window - 50, window * 2])
+
+            # 1) Generate tick positions every 50 units from window-50 up to 2*window
+            ticks = np.arange(window - 50, window * 2 + 1, 50)
+
+            # 2) Build labels by shifting each tick by -window, blanking the first/last
+            labels = [
+                "" if t in (ticks[0], ticks[-1])
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply them
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -941,22 +991,37 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ### Get multivalency scores ###
             rect_fraction = 1 / ((window + 50) / 50)
 
-            middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss',germsdir)[0]
-            middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss',germsdir)[0]
-            downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss',germsdir)[0]
-            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss',germsdir)[0]
-            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss',germsdir)[0]
-            upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss',germsdir)[0]
+            middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'middle_3ss',germsdir)
+            middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'middle_5ss',germsdir)
+            downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'downstream_3ss',germsdir)
+            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'downstream_5ss',germsdir)
+            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'upstream_3ss',germsdir)
+            upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'upstream_5ss',germsdir)
 
-            plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
-            plotting_df.to_csv(f'{output_dir}/{name}_RNAmap_multivalency.tsv', sep="\t")
+            a = middle_3ss_mdf[0]
+            b = middle_5ss_mdf[0]
+            c = downstream_3ss_mdf[0]
+            d = downstream_5ss_mdf[0]
+            e = upstream_3ss_mdf[0]
+            f = upstream_5ss_mdf[0]
+
+            plotting_df = pd.concat([a, b, c, d, e, f])
+            plotting_df.to_csv(f'{output_dir}/{FILEname}_RNAmap_multivalency.tsv', sep="\t")
+
+            logging.info(f'{output_dir}/{FILEname}_RNAmap_multivalency.tsv written to file successfully')
 
             plt.figure()
             sns.set_style("whitegrid")
-            g = sns.relplot(data=plotting_df, x='position', y='smoothed_kmer_multivalency', hue='label', col='type', facet_kws={"sharex":False},
-                        kind='line', col_wrap=6, height=5, aspect=3.5/5,
-                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+
+            g = sns.relplot(data=plotting_df, x='position', y='smoothed_kmer_multivalency', hue='exon_type', 
+                col='type', facet_kws={"sharex": False},
+                kind='line', col_wrap=6, height=5, aspect=3.5/5, errorbar=None,
+                col_order=["upstream_3ss", "upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss", "downstream_5ss"])
+            
+            logging.info("sns.relplot returned")
+            
             titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+
             for ax, title in zip(g.axes.flat, titles):
                 ax.set_title(title)
             g.set(xlabel='')
@@ -965,15 +1030,23 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             set_legend_text(leg, exon_categories, original_counts)
 
             ax = g.axes[0]
-            ax.set_xlim([window, (2*window)+50])
+            ax.set_xlim([window, (2 * window) + 50])
             ax.set_ylim(ymin=1)
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+
+            # 1) Generate tick positions every 50 units from window up to 2*window
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window (blanking only the first tick)
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -990,14 +1063,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[1]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2*window - 50, 3*window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to 3*window
+            ticks = np.arange(2*window - 50, 3*window, 50)
+
+            # 2) Build labels by subtracting 2*window (blanking only the first tick)
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2*window))
+                for t in ticks
+            ]
+
+            # 3) Apply them
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -1014,14 +1095,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[2]
-            ax.set_xlim([window, (2*window)+50])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window, (2 * window) + 50])
+
+            # 1) Generate tick positions every 50 units from window up to 2*window+50
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -1038,14 +1127,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[3]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2*window - 50, 3*window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
+            ticks = np.arange(2*window - 50, 3*window, 50)
+
+            # 2) Build labels by subtracting 2*window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2*window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
@@ -1062,14 +1159,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[4]
-            ax.set_xlim([window, (2*window)+50])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window, (2 * window) + 50])
+
+            # 1) Generate tick positions every 50 units from window up to 2*window+50
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -1086,14 +1191,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[5]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2*window - 50, 3*window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
+            ticks = np.arange(2*window - 50, 3*window, 50)
+
+            # 2) Build labels by subtracting 2*window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2*window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -1114,43 +1227,67 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 bbox_inches='tight',
                 pad_inches=0.5)
             pbt.helpers.cleanup()
+        
+            logging.info(f'RNAmap multivalency plot saved successfully as {output_dir}/{FILEname}_RNAmap_multivalency.pdf')
+
+            # DO THE SAME NOW FOR THE KMERS
+            a = middle_3ss_mdf[1]
+            b = middle_5ss_mdf[1]
+            c = downstream_3ss_mdf[1]
+            d = downstream_5ss_mdf[1]
+            e = upstream_3ss_mdf[1]
+            f = upstream_5ss_mdf[1]
+
+            plotting_df = pd.concat([a,b,c,d,e,f])
+            plotting_df.to_csv(f'{output_dir}/{FILEname}_RNAmap_TOP10KMER_multivalency.tsv', sep="\t")
+
+            logging.info(f'{output_dir}/{FILEname}_RNAmap_TOP10KMER_multivalency.tsv written to file successfully')
+
+            # Filter the data for exon_type 'silenced'
+            filtered_df = plotting_df[plotting_df['exon_type'] == 'silenced'].copy()
 
 
-
-        # DO THE SAME NOW FOR THE KMERS
-            middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_3ss',germsdir)[1]
-            middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, name, 'middle_5ss',germsdir)[1]
-            downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_3ss',germsdir)[1]
-            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'downstream_5ss',germsdir)[1]
-            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_3ss',germsdir)[1]
-            upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, name, 'upstream_5ss',germsdir)[1]
-
-            plotting_df = pd.concat([middle_3ss_mdf, middle_5ss_mdf, downstream_3ss_mdf, downstream_5ss_mdf, upstream_3ss_mdf, upstream_5ss_mdf])
-            plotting_df.to_csv(f'{output_dir}/{name}_RNAmap_TOP10KMER_multivalency.tsv', sep="\t")
-
+            # Now plot using the summarized DataFrame
             plt.figure()
             sns.set_style("whitegrid")
-            g = sns.relplot(data=plotting_df[plotting_df['exon_type'] == 'silenced'], x='position', y='smoothed_kmer_multivalency', hue='kmer', col='type', facet_kws={"sharex":False},
-                        kind='line', col_wrap=6, height=5, aspect=3.5/5,
-                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
+            g = sns.relplot(
+                data=filtered_df,
+                x='position',
+                y='smoothed_kmer_multivalency',
+                hue='kmer',
+                col='type',
+                facet_kws={"sharex": False},
+                kind='line',
+                col_wrap=6,
+                height=5, errorbar=None,
+                aspect=3.5/5,
+                col_order=["upstream_3ss", "upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss", "downstream_5ss"]
+            )
             titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
             for ax, title in zip(g.axes.flat, titles):
                 ax.set_title(title)
             g.set(xlabel='')
             g.axes[0].set_ylabel('mean smoothed kmer multivalency')
             leg = g._legend
-            set_legend_text(leg, exon_categories, original_counts)
 
             ax = g.axes[0]
-            ax.set_xlim([window, (2*window)+50])
+            ax.set_xlim([window, (2 * window) + 50])
             ax.set_ylim(ymin=1)
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+
+            # 1) Generate tick positions every 50 units from window up to 2*window+50
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -1167,14 +1304,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[1]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2 * window - 50, 3 * window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to 3*window
+            ticks = np.arange(2 * window - 50, 3 * window, 50)
+
+            # 2) Build labels by subtracting 2*window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2 * window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -1191,14 +1336,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[2]
-            ax.set_xlim([window, (2*window)+50])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window, (2 * window) + 50])
+
+            # 1) Generate tick positions every 50 units from window up to 2*window+50
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -1215,14 +1368,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[3]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2*window - 50, 3*window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
+            ticks = np.arange(2*window - 50, 3*window, 50)
+
+            # 2) Build labels by subtracting 2*window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2*window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
@@ -1239,14 +1400,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[4]
-            ax.set_xlim([window, (2*window)+50])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window, (2 * window) + 50])
+
+            # 1) Generate tick positions every 50 units from window up to 2*window+50
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -1263,14 +1432,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[5]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2 * window - 50, 3 * window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
+            ticks = np.arange(2 * window - 50, 3 * window, 50)
+
+            # 2) Build labels by subtracting 2*window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2 * window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -1292,10 +1469,12 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 pad_inches=0.5)
             pbt.helpers.cleanup()
 
+            logging.info(f'{output_dir}/{FILEname}_RNAmap_silencedKMER_multivalency.pdf written to file successfully')
+
             plt.figure()
             sns.set_style("whitegrid")
             g = sns.relplot(data=plotting_df[plotting_df['exon_type'] == 'enhanced'], x='position', y='smoothed_kmer_multivalency', hue='kmer', col='type', facet_kws={"sharex":False},
-                        kind='line', col_wrap=6, height=5, aspect=3.5/5,
+                        kind='line', col_wrap=6, height=5, aspect=3.5/5, errorbar=None,
                         col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
             titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
             for ax, title in zip(g.axes.flat, titles):
@@ -1303,17 +1482,25 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             g.set(xlabel='')
             g.axes[0].set_ylabel('mean smoothed kmer multivalency')
             leg = g._legend
-            set_legend_text(leg, exon_categories, original_counts)
+
             ax = g.axes[0]
-            ax.set_xlim([window, (2*window)+50])
+            ax.set_xlim([window, (2 * window) + 50])
             ax.set_ylim(ymin=1)
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+
+            # 1) Generate tick positions every 50 units from window up to 2*window+50
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -1330,14 +1517,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[1]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2 * window - 50, 3 * window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
+            ticks = np.arange(2 * window - 50, 3 * window, 50)
+
+            # 2) Build labels by subtracting 2*window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2 * window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
@@ -1354,14 +1549,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[2]
-            ax.set_xlim([window, (2*window)+50])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window, (2 * window) + 50])
+
+            # 1) Generate tick positions every 50 units from window up to 2*window+50
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -1378,14 +1581,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[3]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2 * window - 50, 3 * window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
+            ticks = np.arange(2 * window - 50, 3 * window, 50)
+
+            # 2) Build labels by subtracting 2*window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2 * window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
@@ -1402,14 +1613,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[4]
-            ax.set_xlim([window, (2*window)+50])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-window,50, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([window, (2 * window) + 50])
+
+            # 1) Generate tick positions every 50 units from window up to 2*window+50
+            ticks = np.arange(window, 2 * window + 50, 50)
+
+            # 2) Build labels by subtracting window, blanking only the first tick
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
 
             rect = matplotlib.patches.Rectangle(
                 xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
@@ -1426,14 +1645,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             ax.add_artist(rect)
 
             ax = g.axes[5]
-            ax.set_xlim([(2*window)-50, 3*window])
-            start, end = ax.get_xlim()
-            ax.xaxis.set_ticks(np.arange(start, end, 50))
-            a=ax.get_xticks().tolist()
-            a = np.arange(-50,window, 50)
-            a = list(map(str, a))
-            a[0] = ""
-            ax.set_xticklabels(a)
+            ax.set_xlim([2 * window - 50, 3 * window])
+
+            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
+            ticks = np.arange(2 * window - 50, 3 * window, 50)
+
+            # 2) Build labels by subtracting 2*window (blanking only the first tick)
+            labels = [
+                "" if t == ticks[0]
+                else str(int(t - 2 * window))
+                for t in ticks
+            ]
+
+            # 3) Apply ticks and labels
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels)
+
             rect = matplotlib.patches.Rectangle(
                 xy=(0, -0.2), width=rect_fraction, height=.1,
                 color="slategrey", alpha=1,
