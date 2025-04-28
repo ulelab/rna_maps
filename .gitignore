@@ -1,5 +1,6 @@
 results
 cirbp-rbm3
+rbfox2_artr
 ford23
 khsrp
 *.pdf
@@ -11,3 +12,5 @@ khsrp
 *bedgraph*
 *.idx
 *log
+*zip
+*fa
