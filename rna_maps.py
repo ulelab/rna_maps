@@ -3,6 +3,9 @@ import matplotlib.ticker as mticker
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.gridspec import GridSpec
 from matplotlib import colormaps
+matplotlib.use('Agg')
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 from scipy.ndimage import gaussian_filter1d
 from matplotlib.lines import Line2D
@@ -21,9 +24,7 @@ import logging
 import datetime
 import time
 
-matplotlib.use('Agg')
-matplotlib.rcParams['pdf.fonttype'] = 42
-matplotlib.rcParams['ps.fonttype'] = 42
+
 
 def smooth_coverage(df, window_size=10, std=2):
     # Create a copy of the dataframe to avoid modifying the original
