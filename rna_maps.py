@@ -165,6 +165,8 @@ def cli():
                     help='Exclude constitutive category from the output')
     optional.add_argument('-g',"--germsdir", type=str, default=os.getcwd(), nargs='?',
                         help='directory for where to find germs.R for multivalency analysis eg. /Users/Bellinda/repos/germs [DEFAULT current directory]')
+    optional.add_argument('-p',"--prefix", type=str,
+                        help='prefix for output files [DEFAULT inputsplice file name]')
     parser._action_groups.append(optional)
     args = parser.parse_args()
 
@@ -186,7 +188,8 @@ def cli():
         args.minsil,
         args.multivalency,
         args.germsdir,
-        args.no_constitutive
+        args.no_constitutive,
+        args.prefix
         )
 
 def df_apply(col_fn, *col_names):
@@ -388,10 +391,10 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     return mdf,top_kmers_df
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, prefix
        #n_exons = 150, n_samples = 300, z_test=False
        ):
-    FILEname = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
+    FILEname = prefix + "_" + de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
     df_fai = pd.read_csv(fai, sep='\t', header=None)
     chroms = set(df_fai[0].values)
     rmats = pd.read_csv(de_file, sep='\t')
@@ -1703,7 +1706,8 @@ if __name__=='__main__':
         min_sil,
         multivalency,
         germsdir,
-        no_constitutive
+        no_constitutive,
+        prefix
     ) = cli()
     
     log_filename, start_time, logger = setup_logging(output_folder)
@@ -1711,7 +1715,7 @@ if __name__=='__main__':
 
     try:
         run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive)
+            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive, prefix)
     finally:
         # Log runtime at the end
         log_runtime(start_time, logger)
