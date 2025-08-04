@@ -559,6 +559,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             # Trying out the heatmap
             heat_df = pd.concat([heatmap_middle_3ss, heatmap_middle_5ss, heatmap_downstream_3ss, heatmap_downstream_5ss, heatmap_upstream_3ss, heatmap_upstream_5ss])
 
+            # Making an output table with total exons covered in each region and category
+            # Step 1: Group by exon_id, label, and name, then sum the coverage
+            grouped_heat_df = heat_df.groupby(['exon_id', 'label', 'name'])['coverage'].sum().reset_index()
+            # Step 2: Filter for exons with >0 total coverage
+            filtered_heat_df = grouped_heat_df[grouped_heat_df['coverage'] > 0]
+            # Step 3: Count unique exon_ids for each label and name combination
+            count_heat_df = filtered_heat_df.groupby(['label', 'name'])['exon_id'].nunique().reset_index()
+            count_heat_df.rename(columns={'exon_id': 'exon_count'}, inplace=True)
+            # Step 4: Pivot to wide format with label as columns
+            final_heat_df = count_heat_df.pivot(index='name', columns='label', values='exon_count').fillna(0)
+            final_heat_df = final_heat_df.reset_index()
+            exon_categories_df = exon_categories.reset_index()
+            exon_categories_df.columns = ['name', 'total_exons_after_subsetting']
+            final_heat_df = final_heat_df.merge(exon_categories_df, on='name', how='left')
+            final_heat_df.to_csv(f'{output_dir}/{FILEname}_totalExonsCovered.tsv', sep="\t", index=False)
+
             # Step 1: Ensure coverage is binary (0 or 1)
             df = heat_df.copy()
             df['coverage'] = (df['coverage'] > 0).astype(int)
