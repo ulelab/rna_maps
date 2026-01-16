@@ -23,6 +23,7 @@ import string
 import logging
 import datetime
 import time
+from collections import defaultdict
 
 
 
@@ -69,6 +70,62 @@ def smooth_coverage(df, window_size=10, std=2):
     
     # Combine all groups back into a single DataFrame
     return pd.concat(groups)
+
+def build_score_lookup(xl_bed):
+    """
+    Precompute summed scores for every genomic base (per strand) in the
+    provided xl_bed file so we can weight coverage by crosslink intensity.
+    """
+    bed = pbt.BedTool(xl_bed)
+    df = bed.to_dataframe()
+
+    if df.empty:
+        return {}
+
+    # Ensure numeric score and strand columns exist
+    if 'score' not in df.columns:
+        df['score'] = 1.0
+    else:
+        df['score'] = pd.to_numeric(df['score'], errors='coerce').fillna(0.0)
+
+    if 'strand' not in df.columns:
+        df['strand'] = '.'
+
+    score_lookup = defaultdict(float)
+
+    for row in df[['chrom', 'start', 'end', 'score', 'strand']].itertuples(index=False):
+        chrom = row[0]
+        start = int(row[1])
+        end = int(row[2])
+        score = float(row[3])
+        strand = row[4] if row[4] in ['+', '-'] else '.'
+
+        if end <= start:
+            end = start + 1
+
+        width = end - start
+        if width <= 0:
+            continue
+
+        increment = score / width if width > 1 else score
+
+        for pos in range(start, end):
+            score_lookup[(chrom, pos, strand)] += increment
+            # Allow strand-agnostic lookups when xl file lacks strand info
+            if strand == '.':
+                score_lookup[(chrom, pos, '+')] += increment
+                score_lookup[(chrom, pos, '-')] += increment
+
+    return score_lookup
+
+def lookup_score(score_lookup, chrom, pos, strand):
+    """
+    Fetch the precomputed score for a genomic base with graceful fallback
+    when strand-specific entries are not available.
+    """
+    if not score_lookup:
+        return 0.0
+    return score_lookup.get((chrom, pos, strand), score_lookup.get((chrom, pos, '.'), 0.0))
 
 def setup_logging(output_path):
     """Sets up logging to file and console, and returns the log filename + start time."""
@@ -167,6 +224,8 @@ def cli():
                         help='directory for where to find germs.R for multivalency analysis eg. /Users/Bellinda/repos/germs [DEFAULT current directory]')
     optional.add_argument('-p',"--prefix", type=str, required=True,
                         help='prefix for output files [DEFAULT inputsplice file name]')
+    optional.add_argument('--use_xl_scores', action="store_true",
+                        help='weight coverage/heatmap by xl BED score and plot log2 fold change')
     parser._action_groups.append(optional)
     args = parser.parse_args()
 
@@ -189,7 +248,8 @@ def cli():
         args.multivalency,
         args.germsdir,
         args.no_constitutive,
-        args.prefix
+        args.prefix,
+        args.use_xl_scores
         )
 
 def df_apply(col_fn, *col_names):
@@ -213,13 +273,28 @@ def get_ss_bed(df, pos_col, neg_col):
 
     return ss
 
-def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
+def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label, use_xl_scores=False, score_lookup=None):
     """Return coverage of xl_bed items around df features extended by windows"""
     df = df.loc[df.name != "."]
     xl_bed = pbt.BedTool(xl_bed).sort()
     pbt_df = pbt.BedTool.from_dataframe(df[['chr', 'start', 'end', 'name', 'score', 'strand']]).sort().slop(l=window, r=window, s=True, g=fai)    
-    df_coverage = pbt_df.coverage(b=xl_bed, **{'sorted': True, 's': True, 'd': True, 'nonamecheck': True}).to_dataframe()[['thickStart', 'thickEnd', 'strand', 'name']]
-    df_coverage.rename(columns=({'thickStart':'position','thickEnd':'coverage'}), inplace=True)
+    df_coverage = pbt_df.coverage(
+        b=xl_bed,
+        **{'sorted': True, 's': True, 'd': True, 'nonamecheck': True}
+    ).to_dataframe()
+
+    df_coverage = df_coverage[['chrom', 'start', 'strand', 'name', 'thickStart', 'thickEnd']].copy()
+    df_coverage.rename(columns={'thickStart': 'position', 'thickEnd': 'coverage'}, inplace=True)
+    df_coverage['genomic_pos'] = df_coverage['start'] + df_coverage['position'] - 1
+
+    if use_xl_scores:
+        if score_lookup is None:
+            raise ValueError("Score lookup dictionary is required when use_xl_scores is True.")
+        keys = list(zip(df_coverage['chrom'], df_coverage['genomic_pos'], df_coverage['strand']))
+        df_coverage['coverage'] = [
+            lookup_score(score_lookup, chrom, pos, strand)
+            for chrom, pos, strand in keys
+        ]
 
     df_plot = df_coverage
     
@@ -248,6 +323,10 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
     # give 0 values a small pseudo-count so that fold change can be calculated
     df_plot.loc[df_plot['control_norm_coverage'] == 0, ['control_norm_coverage']] = 0.000001
     df_plot['fold_change'] = df_plot["norm_coverage"] / df_plot["control_norm_coverage"]
+    df_plot['fold_change'].replace([np.inf, -np.inf], np.nan, inplace=True)
+    df_plot['fold_change'] = df_plot['fold_change'].fillna(0)
+    df_plot.loc[df_plot['fold_change'] <= 0, 'fold_change'] = 0.000001
+    df_plot['log2_fold_change'] = np.log2(df_plot['fold_change'])
     
     contingency_table = list(zip(df_plot['coverage'], df_plot['number_exons']-df_plot['coverage'], df_plot['control_coverage'], df_plot['control_number_exons'] - df_plot['control_coverage']))
     contingency_table = [ np.array(table).reshape(2,2) for table in contingency_table ]
@@ -258,6 +337,10 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label):
 
     df_plot.loc[df_plot['fold_change'] < 1, ['-log10pvalue']] = df_plot['-log10pvalue'] * -1
     df_plot['-log10pvalue_smoothed'] = df_plot['-log10pvalue'].rolling(smoothing, center=True, win_type="gaussian").mean(std=2)
+    df_plot['-log10pvalue_smoothed'] = df_plot['-log10pvalue_smoothed'].fillna(df_plot['-log10pvalue'])
+
+    df_plot['log2_fc_smoothed'] = df_plot['log2_fold_change'].rolling(smoothing, center=True, win_type="gaussian").mean(std=2)
+    df_plot['log2_fc_smoothed'] = df_plot['log2_fc_smoothed'].fillna(df_plot['log2_fold_change'])
 
     return df_plot, heatmap_plot
 
@@ -391,7 +474,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     return mdf,top_kmers_df
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, prefix
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, prefix, use_xl_scores
        #n_exons = 150, n_samples = 300, z_test=False
        ):
     FILEname = prefix + "_" + de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
@@ -435,6 +518,8 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             choices = ["silenced", "enhanced", "constituitive", "control"]
 
         df_rmats["category"] = np.select(conditions, choices, default=None)
+
+        df_rmats.to_csv(f'{output_dir}/{FILEname}_RMATS_with_categories.tsv', sep="\t")
 
         exon_categories = df_rmats.groupby('category').size()
         #exon_categories.columns = ["name", "exon_number"]
@@ -490,23 +575,6 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         exon_categories = df_rmats.groupby('category').size()
 
-        # identifiers for outputs and heatmap mapping
-        df_rmats["exon_id"] = (
-            df_rmats["category"].astype(str)
-            + "_" + df_rmats["chr"].astype(str)
-            + ":" + df_rmats["exonStart_0base"].astype(str)
-            + "-" + df_rmats["exonEnd"].astype(str)
-            + ";" + df_rmats["strand"].astype(str)
-        )
-        # heatmap uses the part after the first underscore (chr:start-end;strand)
-        df_rmats["heatmap_exon_id"] = (
-            df_rmats["chr"].astype(str)
-            + ":" + df_rmats["exonStart_0base"].astype(str)
-            + "-" + df_rmats["exonEnd"].astype(str)
-            + ";" + df_rmats["strand"].astype(str)
-        )
-        df_rmats["heatmap_row"] = np.nan
-
         ####### Exon lengths #######
         df_rmats["regulated_exon_length"] = df_rmats['exonEnd'] - df_rmats['exonStart_0base']
         df_rmats["upstream_exon_length"] = df_rmats['upstreamEE'] - df_rmats['upstreamES']
@@ -546,13 +614,23 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','upstreamEE')
         upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','upstreamES')
 
+        score_lookup = None
+        weight_scores = use_xl_scores and xl_bed is not None
+        if use_xl_scores and xl_bed is None:
+            logging.warning("use_xl_scores enabled but no xl_bed provided; falling back to count-based coverage.")
+            weight_scores = False
+
+        if weight_scores:
+            logging.info("Precomputing score lookup for xl_bed to weight coverage.")
+            score_lookup = build_score_lookup(xl_bed)
+
         if xl_bed is not None:
-            middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
-            middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss')
-            downstream_3ss = get_coverage_plot(xl_bed, downstream_3ss_bed, fai, window, exon_categories, 'downstream_3ss')
-            downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss')
-            upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
-            upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss')
+            middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss', weight_scores, score_lookup)
+            middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss', weight_scores, score_lookup)
+            downstream_3ss = get_coverage_plot(xl_bed, downstream_3ss_bed, fai, window, exon_categories, 'downstream_3ss', weight_scores, score_lookup)
+            downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss', weight_scores, score_lookup)
+            upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss', weight_scores, score_lookup)
+            upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss', weight_scores, score_lookup)
 
             linegraph_middle_3ss = middle_3ss[0]
             linegraph_middle_5ss = middle_5ss[0]
@@ -590,9 +668,12 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             final_heat_df = final_heat_df.merge(exon_categories_df, on='name', how='left')
             final_heat_df.to_csv(f'{output_dir}/{FILEname}_totalExonsCovered.tsv', sep="\t", index=False)
 
-            # Step 1: Ensure coverage is binary (0 or 1)
+            # Step 1: Choose representation for coverage (binary vs score-weighted)
             df = heat_df.copy()
-            df['coverage'] = (df['coverage'] > 0).astype(int)
+            if weight_scores:
+                df['coverage'] = df['coverage'].astype(float)
+            else:
+                df['coverage'] = (df['coverage'] > 0).astype(int)
             df = smooth_coverage(df)
             
             labels = ['upstream_3ss', 'upstream_5ss', 'middle_3ss', 'middle_5ss', 'downstream_3ss', 'downstream_5ss']
@@ -653,17 +734,6 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 
             # Get the sorted exon IDs
             sorted_exon_ids = exon_info.index.tolist()
-
-            # Map heatmap row (1-based, top to bottom) back to the rMATS table
-            # Per-category row numbers (per the heatmap layout)
-            exon_info['heatmap_row'] = exon_info.groupby('name').cumcount() + 1
-
-            heatmap_order_df = exon_info.reset_index()[['exon_id', 'name', 'heatmap_row']]
-            heatmap_order_df.rename(columns={'exon_id': 'heatmap_exon_id'}, inplace=True)
-
-            df_rmats = df_rmats.drop(columns=['heatmap_row'], errors='ignore')
-            df_rmats = df_rmats.merge(heatmap_order_df[['heatmap_exon_id', 'heatmap_row']],
-                                      on='heatmap_exon_id', how='left')
                 
             # Step 9: Set up the figure
             width = max(15, len(labels) * 4)
@@ -806,7 +876,10 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             #sns.set(rc={'figure.figsize':(7, 5)})
             sns.set_style("whitegrid")
 
-            g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', facet_kws={"sharex":False},
+            y_metric = 'log2_fc_smoothed' if weight_scores else '-log10pvalue_smoothed'
+            y_label = 'log2 fold change (score/control)' if weight_scores else '-log10(p value) enrichment / control'
+
+            g = sns.relplot(data=plotting_df, x='position', y=y_metric, hue='name', col='label', facet_kws={"sharex":False},
                         kind='line', col_wrap=6, height=5, aspect=4/5,
                         col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
             titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
@@ -817,7 +890,7 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 marker_ax = add_enrichment_marker(fig, ax) 
 
             g.set(xlabel='')
-            g.axes[0].set_ylabel('-log10(p value) enrichment / control')
+            g.axes[0].set_ylabel(y_label)
 
             sns.move_legend(
                 g, "upper right",  # Position: 'upper left' relative to bbox
@@ -1727,9 +1800,8 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 bbox_inches='tight',
                 pad_inches=0.5)
             pbt.helpers.cleanup()
-    # Final write of the annotated rMATS table (with heatmap row if available)
-    df_rmats.to_csv(f'{output_dir}/{FILEname}_RMATS_with_categories.tsv', sep="\t", index=False)
-    sys.exit()
+        sys.exit()
+
 
  
 if __name__=='__main__':
@@ -1750,7 +1822,8 @@ if __name__=='__main__':
         multivalency,
         germsdir,
         no_constitutive,
-        prefix
+        prefix,
+        use_xl_scores
     ) = cli()
     
     log_filename, start_time, logger = setup_logging(output_folder)
@@ -1758,7 +1831,7 @@ if __name__=='__main__':
 
     try:
         run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive, prefix)
+            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive, prefix, use_xl_scores)
     finally:
         # Log runtime at the end
         log_runtime(start_time, logger)
