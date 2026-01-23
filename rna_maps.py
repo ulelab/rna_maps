@@ -165,6 +165,8 @@ def cli():
                     help='Exclude constitutive category from the output')
     optional.add_argument('-ns','--no_subset', action="store_true", 
                     help='Disable subsetting of control/constitutive exons to match enhanced/silenced counts')
+    optional.add_argument('-ao','--all_sites', action="store_true", 
+                    help='Include all splice sites (upstream_3ss and downstream_5ss), default is core sites only')
     optional.add_argument('-g',"--germsdir", type=str, default=os.getcwd(), nargs='?',
                         help='directory for where to find germs.R for multivalency analysis eg. /Users/Bellinda/repos/germs [DEFAULT current directory]')
     optional.add_argument('-p',"--prefix", type=str,
@@ -192,6 +194,7 @@ def cli():
         args.germsdir,
         args.no_constitutive,
         args.no_subset,
+        args.all_sites,
         args.prefix
         )
 
@@ -394,7 +397,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     return mdf,top_kmers_df
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, no_subset, prefix
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, no_subset, all_sites, prefix
        #n_exons = 150, n_samples = 300, z_test=False
        ):
     FILEname = prefix + "_" + de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
@@ -536,37 +539,42 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         middle_3ss_bed = get_ss_bed(df_rmats,'exonStart_0base','exonEnd')
         middle_5ss_bed = get_ss_bed(df_rmats,'exonEnd','exonStart_0base')
         downstream_3ss_bed = get_ss_bed(df_rmats,'downstreamES','downstreamEE')
-        downstream_5ss_bed = get_ss_bed(df_rmats,'downstreamEE','downstreamES')
-        upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','upstreamEE')
         upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','upstreamES')
+        if all_sites:
+            downstream_5ss_bed = get_ss_bed(df_rmats,'downstreamEE','downstreamES')
+            upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','upstreamEE')
 
         if xl_bed is not None:
             middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
             middle_5ss = get_coverage_plot(xl_bed, middle_5ss_bed, fai, window, exon_categories, 'middle_5ss')
             downstream_3ss = get_coverage_plot(xl_bed, downstream_3ss_bed, fai, window, exon_categories, 'downstream_3ss')
-            downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss')
-            upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
             upstream_5ss = get_coverage_plot(xl_bed, upstream_5ss_bed, fai, window, exon_categories, 'upstream_5ss')
+            if all_sites:
+                downstream_5ss = get_coverage_plot(xl_bed, downstream_5ss_bed, fai, window, exon_categories, 'downstream_5ss')
+                upstream_3ss = get_coverage_plot(xl_bed, upstream_3ss_bed, fai, window, exon_categories, 'upstream_3ss')
 
             linegraph_middle_3ss = middle_3ss[0]
             linegraph_middle_5ss = middle_5ss[0]
             linegraph_downstream_3ss = downstream_3ss[0]
-            linegraph_downstream_5ss = downstream_5ss[0]
-            linegraph_upstream_3ss = upstream_3ss[0]
             linegraph_upstream_5ss = upstream_5ss[0]
 
             heatmap_middle_3ss = middle_3ss[1]
             heatmap_middle_5ss = middle_5ss[1]
             heatmap_downstream_3ss = downstream_3ss[1]
-            heatmap_downstream_5ss = downstream_5ss[1]
-            heatmap_upstream_3ss = upstream_3ss[1]
             heatmap_upstream_5ss = upstream_5ss[1]
 
-            plotting_df = pd.concat([linegraph_middle_3ss, linegraph_middle_5ss, linegraph_downstream_3ss, linegraph_downstream_5ss, linegraph_upstream_3ss, linegraph_upstream_5ss])
-            plotting_df.to_csv(f'{output_dir}/{FILEname}_RNAmap.tsv', sep="\t")
+            if not all_sites:
+                plotting_df = pd.concat([linegraph_upstream_5ss, linegraph_middle_3ss, linegraph_middle_5ss, linegraph_downstream_3ss])
+                heat_df = pd.concat([heatmap_upstream_5ss, heatmap_middle_3ss, heatmap_middle_5ss, heatmap_downstream_3ss])
+            else:
+                linegraph_downstream_5ss = downstream_5ss[0]
+                linegraph_upstream_3ss = upstream_3ss[0]
+                heatmap_downstream_5ss = downstream_5ss[1]
+                heatmap_upstream_3ss = upstream_3ss[1]
+                plotting_df = pd.concat([linegraph_middle_3ss, linegraph_middle_5ss, linegraph_downstream_3ss, linegraph_downstream_5ss, linegraph_upstream_3ss, linegraph_upstream_5ss])
+                heat_df = pd.concat([heatmap_middle_3ss, heatmap_middle_5ss, heatmap_downstream_3ss, heatmap_downstream_5ss, heatmap_upstream_3ss, heatmap_upstream_5ss])
 
-            # Trying out the heatmap
-            heat_df = pd.concat([heatmap_middle_3ss, heatmap_middle_5ss, heatmap_downstream_3ss, heatmap_downstream_5ss, heatmap_upstream_3ss, heatmap_upstream_5ss])
+            plotting_df.to_csv(f'{output_dir}/{FILEname}_RNAmap.tsv', sep="\t")
 
             # Making an output table with total exons covered in each region and category
             # Step 1: Group by exon_id, label, and name, then sum the coverage
@@ -589,7 +597,10 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             df['coverage'] = (df['coverage'] > 0).astype(int)
             df = smooth_coverage(df)
             
-            labels = ['upstream_3ss', 'upstream_5ss', 'middle_3ss', 'middle_5ss', 'downstream_3ss', 'downstream_5ss']
+            if not all_sites:
+                labels = ['upstream_5ss', 'middle_3ss', 'middle_5ss', 'downstream_3ss']
+            else:
+                labels = ['upstream_3ss', 'upstream_5ss', 'middle_3ss', 'middle_5ss', 'downstream_3ss', 'downstream_5ss']
                 
             # Step 2: Calculate total signal for each exon across ALL regions
             exon_totals = df.groupby('exon_id')['coverage'].sum().reset_index()
@@ -789,10 +800,17 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             #sns.set(rc={'figure.figsize':(7, 5)})
             sns.set_style("whitegrid")
 
+            if not all_sites:
+                col_order = ["upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss"]
+                titles = ["Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS"]
+                col_wrap = 4
+            else:
+                col_order = ["upstream_3ss", "upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss", "downstream_5ss"]
+                titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+                col_wrap = 6
             g = sns.relplot(data=plotting_df, x='position', y='-log10pvalue_smoothed', hue='name', col='label', facet_kws={"sharex":False},
-                        kind='line', col_wrap=6, height=5, aspect=4/5,
-                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
-            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+                        kind='line', col_wrap=col_wrap, height=5, aspect=4/5,
+                        col_order=col_order)
             for ax, title in zip(g.axes.flat, titles):
                 ax.set_title(title)
                 ax.axhline(y=0, color='k', alpha=0.2, linewidth=0.5)
@@ -817,196 +835,54 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             # for calculating rectangle size
             rect_fraction = 1 / ((window + 50) / 50)
 
-            ax = g.axes[0]
-            ax.set_xlim([0, window + 50])
-
-            # 1) Generate tick positions every 50 units from 0 to window+50
-            ticks = np.arange(0, window + 51, 50)
-
-            # 2) Generate labels by shifting positions by -window, blanking first/last
-            labels = [
-                "" if t in (ticks[0], ticks[-1])
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[1]
-            ax.set_xlim([window - 50, window * 2])
-
-            # 1) Generate tick positions every 50 units from window-50 up to 2*window
-            ticks = np.arange(window - 50, window * 2 + 1, 50)
-
-            # 2) Build labels by shifting each tick by -window, blanking the first/last
-            labels = [
-                "" if t in (ticks[0], ticks[-1])
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply them
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-
-
-            ax = g.axes[1]
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[2]
-            ax.set_xlim([0, window + 50])
-
-            # 1) Generate tick positions every 50 units from 0 to window+50
-            ticks = np.arange(0, window + 51, 50)
-
-            # 2) Generate labels by shifting positions by -window, blanking first/last
-            labels = [
-                "" if t in (ticks[0], ticks[-1])
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="midnightblue", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[2]
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[3]
-            ax.set_xlim([window - 50, window * 2])
-
-            # 1) Generate tick positions every 50 units from window-50 up to 2*window
-            ticks = np.arange(window - 50, window * 2 + 1, 50)
-
-            # 2) Build labels by shifting each tick by -window, blanking the first/last
-            labels = [
-                "" if t in (ticks[0], ticks[-1])
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply them
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="midnightblue", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[3]
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[4]
-            ax.set_xlim([0, window + 50])
-
-            # 1) Generate tick positions every 50 units from 0 to window+50
-            ticks = np.arange(0, window + 51, 50)
-
-            # 2) Generate labels by shifting positions by -window, blanking first/last
-            labels = [
-                "" if t in (ticks[0], ticks[-1])
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[5]
-            ax.set_xlim([window - 50, window * 2])
-
-            # 1) Generate tick positions every 50 units from window-50 up to 2*window
-            ticks = np.arange(window - 50, window * 2 + 1, 50)
-
-            # 2) Build labels by shifting each tick by -window, blanking the first/last
-            labels = [
-                "" if t in (ticks[0], ticks[-1])
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply them
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[5]
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
+            # Configure each axis based on splice site type in col_order
+            for i, ss_type in enumerate(col_order):
+                ax = g.axes[i]
+                
+                # Determine if this is a middle exon (use different color)
+                is_middle = ss_type.startswith('middle_')
+                exon_color = "midnightblue" if is_middle else "slategrey"
+                
+                if ss_type.endswith('_3ss'):
+                    # 3' splice site: exon on right side
+                    ax.set_xlim([0, window + 50])
+                    ticks = np.arange(0, window + 51, 50)
+                    labels = ["" if t in (ticks[0], ticks[-1]) else str(int(t - window)) for t in ticks]
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels(labels)
+                    
+                    # Exon rectangle on right
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                        color=exon_color, alpha=1,
+                        transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                    # Intron line on left
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                        color="slategrey", alpha=1,
+                        transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                else:
+                    # 5' splice site: exon on left side
+                    ax.set_xlim([window - 50, window * 2])
+                    ticks = np.arange(window - 50, window * 2 + 1, 50)
+                    labels = ["" if t in (ticks[0], ticks[-1]) else str(int(t - window)) for t in ticks]
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels(labels)
+                    
+                    # Exon rectangle on left
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(0, -0.2), width=rect_fraction, height=.1,
+                        color=exon_color, alpha=1,
+                        transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                    # Intron line on right
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                        color="slategrey", alpha=1,
+                        transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
 
             # Adjust subplot spacing and save with enough room for legend and arrows
             plt.subplots_adjust(wspace=0.05)  
@@ -1023,18 +899,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             middle_3ss_mdf = get_multivalency_scores(middle_3ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'middle_3ss',germsdir)
             middle_5ss_mdf = get_multivalency_scores(middle_5ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'middle_5ss',germsdir)
             downstream_3ss_mdf = get_multivalency_scores(downstream_3ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'downstream_3ss',germsdir)
-            downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'downstream_5ss',germsdir)
-            upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'upstream_3ss',germsdir)
             upstream_5ss_mdf = get_multivalency_scores(upstream_5ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'upstream_5ss',germsdir)
+            if all_sites:
+                downstream_5ss_mdf = get_multivalency_scores(downstream_5ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'downstream_5ss',germsdir)
+                upstream_3ss_mdf = get_multivalency_scores(upstream_3ss_bed, fai, window, genome_fasta, output_dir, FILEname, 'upstream_3ss',germsdir)
 
             a = middle_3ss_mdf[0]
             b = middle_5ss_mdf[0]
             c = downstream_3ss_mdf[0]
-            d = downstream_5ss_mdf[0]
-            e = upstream_3ss_mdf[0]
             f = upstream_5ss_mdf[0]
 
-            plotting_df = pd.concat([a, b, c, d, e, f])
+            if not all_sites:
+                plotting_df = pd.concat([f, a, b, c])
+            else:
+                d = downstream_5ss_mdf[0]
+                e = upstream_3ss_mdf[0]
+                plotting_df = pd.concat([a, b, c, d, e, f])
             plotting_df.to_csv(f'{output_dir}/{FILEname}_RNAmap_multivalency.tsv', sep="\t")
 
             logging.info(f'{output_dir}/{FILEname}_RNAmap_multivalency.tsv written to file successfully')
@@ -1042,14 +922,23 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             plt.figure()
             sns.set_style("whitegrid")
 
+            if not all_sites:
+                mv_col_order = ["upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss"]
+                mv_titles = ["Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS"]
+                mv_col_wrap = 4
+            else:
+                mv_col_order = ["upstream_3ss", "upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss", "downstream_5ss"]
+                mv_titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+                mv_col_wrap = 6
+
             g = sns.relplot(data=plotting_df, x='position', y='smoothed_kmer_multivalency', hue='exon_type', 
                 col='type', facet_kws={"sharex": False},
-                kind='line', col_wrap=6, height=5, aspect=3.5/5, errorbar=None,
-                col_order=["upstream_3ss", "upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss", "downstream_5ss"])
+                kind='line', col_wrap=mv_col_wrap, height=5, aspect=3.5/5, errorbar=None,
+                col_order=mv_col_order)
             
             logging.info("sns.relplot returned")
             
-            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+            titles = mv_titles
 
             for ax, title in zip(g.axes.flat, titles):
                 ax.set_title(title)
@@ -1058,197 +947,56 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             leg = g._legend
             set_legend_text(leg, exon_categories, original_counts)
 
-            ax = g.axes[0]
-            ax.set_xlim([window, (2 * window) + 50])
-            ax.set_ylim(ymin=1)
-
-            # 1) Generate tick positions every 50 units from window up to 2*window
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window (blanking only the first tick)
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[1]
-            ax.set_xlim([2*window - 50, 3*window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to 3*window
-            ticks = np.arange(2*window - 50, 3*window, 50)
-
-            # 2) Build labels by subtracting 2*window (blanking only the first tick)
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2*window))
-                for t in ticks
-            ]
-
-            # 3) Apply them
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[1]
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[2]
-            ax.set_xlim([window, (2 * window) + 50])
-
-            # 1) Generate tick positions every 50 units from window up to 2*window+50
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="midnightblue", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[3]
-            ax.set_xlim([2*window - 50, 3*window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
-            ticks = np.arange(2*window - 50, 3*window, 50)
-
-            # 2) Build labels by subtracting 2*window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2*window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="midnightblue", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[4]
-            ax.set_xlim([window, (2 * window) + 50])
-
-            # 1) Generate tick positions every 50 units from window up to 2*window+50
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[5]
-            ax.set_xlim([2*window - 50, 3*window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
-            ticks = np.arange(2*window - 50, 3*window, 50)
-
-            # 2) Build labels by subtracting 2*window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2*window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
+            # Configure each axis based on splice site type in mv_col_order
+            for i, ss_type in enumerate(mv_col_order):
+                ax = g.axes[i]
+                if i == 0:
+                    ax.set_ylim(ymin=1)
+                
+                # Determine if this is a middle exon (use different color)
+                is_middle = ss_type.startswith('middle_')
+                exon_color = "midnightblue" if is_middle else "slategrey"
+                
+                if ss_type.endswith('_3ss'):
+                    # 3' splice site: exon on right side
+                    ax.set_xlim([window, (2 * window) + 50])
+                    ticks = np.arange(window, 2 * window + 50, 50)
+                    labels = ["" if t == ticks[0] else str(int(t - window)) for t in ticks]
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels(labels)
+                    
+                    # Exon rectangle on right
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                        color=exon_color, alpha=1,
+                        transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                    # Intron line on left
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                        color="slategrey", alpha=1,
+                        transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                else:
+                    # 5' splice site: exon on left side
+                    ax.set_xlim([2*window - 50, 3*window])
+                    ticks = np.arange(2*window - 50, 3*window, 50)
+                    labels = ["" if t == ticks[0] else str(int(t - 2*window)) for t in ticks]
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels(labels)
+                    
+                    # Exon rectangle on left
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(0, -0.2), width=rect_fraction, height=.1,
+                        color=exon_color, alpha=1,
+                        transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                    # Intron line on right
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                        color="slategrey", alpha=1,
+                        transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
 
             plt.subplots_adjust(wspace=0.01)
             plt.savefig(f'{output_dir}/{FILEname}_RNAmap_multivalency.pdf',
@@ -1263,11 +1011,14 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             a = middle_3ss_mdf[1]
             b = middle_5ss_mdf[1]
             c = downstream_3ss_mdf[1]
-            d = downstream_5ss_mdf[1]
-            e = upstream_3ss_mdf[1]
             f = upstream_5ss_mdf[1]
 
-            plotting_df = pd.concat([a,b,c,d,e,f])
+            if not all_sites:
+                plotting_df = pd.concat([f, a, b, c])
+            else:
+                d = downstream_5ss_mdf[1]
+                e = upstream_3ss_mdf[1]
+                plotting_df = pd.concat([a, b, c, d, e, f])
             plotting_df.to_csv(f'{output_dir}/{FILEname}_RNAmap_TOP10KMER_multivalency.tsv', sep="\t")
 
             logging.info(f'{output_dir}/{FILEname}_RNAmap_TOP10KMER_multivalency.tsv written to file successfully')
@@ -1287,209 +1038,55 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 col='type',
                 facet_kws={"sharex": False},
                 kind='line',
-                col_wrap=6,
+                col_wrap=mv_col_wrap,
                 height=5, errorbar=None,
                 aspect=3.5/5,
-                col_order=["upstream_3ss", "upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss", "downstream_5ss"]
+                col_order=mv_col_order
             )
-            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+            titles = mv_titles
             for ax, title in zip(g.axes.flat, titles):
                 ax.set_title(title)
             g.set(xlabel='')
             g.axes[0].set_ylabel('mean smoothed kmer multivalency')
             leg = g._legend
 
-            ax = g.axes[0]
-            ax.set_xlim([window, (2 * window) + 50])
-            ax.set_ylim(ymin=1)
-
-            # 1) Generate tick positions every 50 units from window up to 2*window+50
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[1]
-            ax.set_xlim([2 * window - 50, 3 * window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to 3*window
-            ticks = np.arange(2 * window - 50, 3 * window, 50)
-
-            # 2) Build labels by subtracting 2*window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2 * window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[1]
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[2]
-            ax.set_xlim([window, (2 * window) + 50])
-
-            # 1) Generate tick positions every 50 units from window up to 2*window+50
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="midnightblue", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[3]
-            ax.set_xlim([2*window - 50, 3*window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
-            ticks = np.arange(2*window - 50, 3*window, 50)
-
-            # 2) Build labels by subtracting 2*window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2*window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="midnightblue", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[4]
-            ax.set_xlim([window, (2 * window) + 50])
-
-            # 1) Generate tick positions every 50 units from window up to 2*window+50
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[5]
-            ax.set_xlim([2 * window - 50, 3 * window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
-            ticks = np.arange(2 * window - 50, 3 * window, 50)
-
-            # 2) Build labels by subtracting 2*window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2 * window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
+            # Configure each axis based on splice site type in mv_col_order
+            for i, ss_type in enumerate(mv_col_order):
+                ax = g.axes[i]
+                if i == 0:
+                    ax.set_ylim(ymin=1)
+                
+                is_middle = ss_type.startswith('middle_')
+                exon_color = "midnightblue" if is_middle else "slategrey"
+                
+                if ss_type.endswith('_3ss'):
+                    ax.set_xlim([window, (2 * window) + 50])
+                    ticks = np.arange(window, 2 * window + 50, 50)
+                    labels = ["" if t == ticks[0] else str(int(t - window)) for t in ticks]
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels(labels)
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                        color=exon_color, alpha=1, transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                        color="slategrey", alpha=1, transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                else:
+                    ax.set_xlim([2*window - 50, 3*window])
+                    ticks = np.arange(2*window - 50, 3*window, 50)
+                    labels = ["" if t == ticks[0] else str(int(t - 2*window)) for t in ticks]
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels(labels)
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(0, -0.2), width=rect_fraction, height=.1,
+                        color=exon_color, alpha=1, transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                        color="slategrey", alpha=1, transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
 
             plt.subplots_adjust(wspace=0.01)
             plt.savefig(f'{output_dir}/{FILEname}_RNAmap_silencedKMER_multivalency.pdf',
@@ -1503,206 +1100,52 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             plt.figure()
             sns.set_style("whitegrid")
             g = sns.relplot(data=plotting_df[plotting_df['exon_type'] == 'enhanced'], x='position', y='smoothed_kmer_multivalency', hue='kmer', col='type', facet_kws={"sharex":False},
-                        kind='line', col_wrap=6, height=5, aspect=3.5/5, errorbar=None,
-                        col_order=["upstream_3ss","upstream_5ss","middle_3ss","middle_5ss","downstream_3ss","downstream_5ss"])
-            titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS", "Downstream 5'SS"]
+                        kind='line', col_wrap=mv_col_wrap, height=5, aspect=3.5/5, errorbar=None,
+                        col_order=mv_col_order)
+            titles = mv_titles
             for ax, title in zip(g.axes.flat, titles):
                 ax.set_title(title)
             g.set(xlabel='')
             g.axes[0].set_ylabel('mean smoothed kmer multivalency')
             leg = g._legend
 
-            ax = g.axes[0]
-            ax.set_xlim([window, (2 * window) + 50])
-            ax.set_ylim(ymin=1)
-
-            # 1) Generate tick positions every 50 units from window up to 2*window+50
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[1]
-            ax.set_xlim([2 * window - 50, 3 * window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
-            ticks = np.arange(2 * window - 50, 3 * window, 50)
-
-            # 2) Build labels by subtracting 2*window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2 * window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[1]
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[2]
-            ax.set_xlim([window, (2 * window) + 50])
-
-            # 1) Generate tick positions every 50 units from window up to 2*window+50
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="midnightblue", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[3]
-            ax.set_xlim([2 * window - 50, 3 * window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
-            ticks = np.arange(2 * window - 50, 3 * window, 50)
-
-            # 2) Build labels by subtracting 2*window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2 * window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="midnightblue", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[4]
-            ax.set_xlim([window, (2 * window) + 50])
-
-            # 1) Generate tick positions every 50 units from window up to 2*window+50
-            ticks = np.arange(window, 2 * window + 50, 50)
-
-            # 2) Build labels by subtracting window, blanking only the first tick
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            ax = g.axes[5]
-            ax.set_xlim([2 * window - 50, 3 * window])
-
-            # 1) Generate tick positions every 50 units from 2*window-50 up to (but not including) 3*window
-            ticks = np.arange(2 * window - 50, 3 * window, 50)
-
-            # 2) Build labels by subtracting 2*window (blanking only the first tick)
-            labels = [
-                "" if t == ticks[0]
-                else str(int(t - 2 * window))
-                for t in ticks
-            ]
-
-            # 3) Apply ticks and labels
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(0, -0.2), width=rect_fraction, height=.1,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
-
-            rect = matplotlib.patches.Rectangle(
-                xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
-                color="slategrey", alpha=1,
-                transform=ax.transAxes, clip_on=False,
-                )
-            ax.add_artist(rect)
+            # Configure each axis based on splice site type in mv_col_order
+            for i, ss_type in enumerate(mv_col_order):
+                ax = g.axes[i]
+                if i == 0:
+                    ax.set_ylim(ymin=1)
+                
+                is_middle = ss_type.startswith('middle_')
+                exon_color = "midnightblue" if is_middle else "slategrey"
+                
+                if ss_type.endswith('_3ss'):
+                    ax.set_xlim([window, (2 * window) + 50])
+                    ticks = np.arange(window, 2 * window + 50, 50)
+                    labels = ["" if t == ticks[0] else str(int(t - window)) for t in ticks]
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels(labels)
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(1 - rect_fraction, -0.2), width=rect_fraction, height=.1,
+                        color=exon_color, alpha=1, transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(0, -0.15), width=1 - rect_fraction, height=.001,
+                        color="slategrey", alpha=1, transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                else:
+                    ax.set_xlim([2*window - 50, 3*window])
+                    ticks = np.arange(2*window - 50, 3*window, 50)
+                    labels = ["" if t == ticks[0] else str(int(t - 2*window)) for t in ticks]
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels(labels)
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(0, -0.2), width=rect_fraction, height=.1,
+                        color=exon_color, alpha=1, transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
+                    rect = matplotlib.patches.Rectangle(
+                        xy=(rect_fraction, -0.15), width=1 - rect_fraction, height=.001,
+                        color="slategrey", alpha=1, transform=ax.transAxes, clip_on=False)
+                    ax.add_artist(rect)
 
             plt.subplots_adjust(wspace=0.01)
             plt.savefig(f'{output_dir}/{FILEname}_RNAmap_enhancedKMER_multivalency.pdf',
@@ -1733,6 +1176,7 @@ if __name__=='__main__':
         germsdir,
         no_constitutive,
         no_subset,
+        all_sites,
         prefix
     ) = cli()
     
@@ -1741,7 +1185,7 @@ if __name__=='__main__':
 
     try:
         run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive, no_subset, prefix)
+            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive, no_subset, all_sites, prefix)
     finally:
         # Log runtime at the end
         log_runtime(start_time, logger)
