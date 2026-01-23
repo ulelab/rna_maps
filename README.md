@@ -60,10 +60,11 @@ python rna_maps.py -h
 usage: rna_maps.py [-h] -i INPUTSPLICE [-x [INPUTXLSITES]] -f GENOMEFASTA -fi
                    FASTAINDEX [-o [OUTPUTPATH]] [-w [WINDOW]] [-s [SMOOTHING]]
                    [-mc [MINCTRL]] [-xc [MAXCTRL]] [-xi [MAXINCL]] [-xf [MAXFDR]]
-                   [-xe [MAXENH]] [-ms [MINSIL]] [-v] [-nc] [-ns] [-g [GERMSDIR]]
+                   [-xe [MAXENH]] [-ms [MINSIL]] [-v] [-nc] [-ns] [-ao] [-g [GERMSDIR]]
                    [-p PREFIX]
 
-Plot CLIP crosslinks around regulated exons to study position-dependent impact on pre-mRNA splicing.
+Plot CLIP crosslinks around regulated exons to study position-dependent impact on pre-
+mRNA splicing.
 
 required arguments:
   -i INPUTSPLICE, --inputsplice INPUTSPLICE
@@ -105,11 +106,13 @@ options:
                         Exclude constitutive category from the output
   -ns, --no_subset      Disable subsetting of control/constitutive exons to match
                         enhanced/silenced counts
+  -ao, --all_sites      Include all splice sites (upstream_3ss and downstream_5ss),
+                        default is core sites only
   -g [GERMSDIR], --germsdir [GERMSDIR]
                         directory for where to find germs.R for multivalency analysis
                         eg. /Users/Bellinda/repos/germs [DEFAULT current directory]
   -p PREFIX, --prefix PREFIX
-                        prefix for output files [DEFAULT inputsplice file name
+                        prefix for output files [DEFAULT inputsplice file name]```
 ```
 
 ### Definitions
