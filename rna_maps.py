@@ -163,6 +163,8 @@ def cli():
     optional.add_argument('-v','--multivalency', action="store_true")
     optional.add_argument('-nc','--no_constitutive', action="store_true", 
                     help='Exclude constitutive category from the output')
+    optional.add_argument('-ns','--no_subset', action="store_true", 
+                    help='Disable subsetting of control/constitutive exons to match enhanced/silenced counts')
     optional.add_argument('-g',"--germsdir", type=str, default=os.getcwd(), nargs='?',
                         help='directory for where to find germs.R for multivalency analysis eg. /Users/Bellinda/repos/germs [DEFAULT current directory]')
     optional.add_argument('-p',"--prefix", type=str,
@@ -189,6 +191,7 @@ def cli():
         args.multivalency,
         args.germsdir,
         args.no_constitutive,
+        args.no_subset,
         args.prefix
         )
 
@@ -391,7 +394,7 @@ def get_multivalency_scores(df, fai, window, genome_fasta, output_dir, name, typ
     return mdf,top_kmers_df
 
 def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, prefix
+        min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, no_subset, prefix
        #n_exons = 150, n_samples = 300, z_test=False
        ):
     FILEname = prefix + "_" + de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
@@ -453,42 +456,45 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
             logging.info('Warning! There are no regulated exons, try changing filtering parameters or file and run again.')
             sys.exit()
         
-        # Apply subsetting for the plotting
-        # Get the count of each category
-        category_counts = df_rmats['category'].value_counts()
-        # Store original counts
-        original_counts = {cat: count for cat, count in category_counts.items()}
-    
-        # Find the maximum count of enhanced or silenced
-        target_count = 0
-        if 'enhanced' in category_counts and 'silenced' in category_counts:
-            target_count = max(category_counts['enhanced'], category_counts['silenced'])
-        elif 'enhanced' in category_counts:
-            target_count = category_counts['enhanced']
-        elif 'silenced' in category_counts:
-            target_count = category_counts['silenced']
-    
-        # Subset control exons
-        if 'control' in category_counts and category_counts['control'] > target_count > 0:
-            control_indices = df_rmats[df_rmats['category'] == 'control'].index
-            # Randomly select indices to keep
-            control_indices_to_keep = np.random.choice(control_indices, target_count, replace=False)
-            # Create a mask for rows to drop
-            drop_mask = df_rmats.index.isin(control_indices) & ~df_rmats.index.isin(control_indices_to_keep)
-            # Drop the rows
-            df_rmats = df_rmats[~drop_mask]
-            logging.info(f"Randomly subsetted control exons from {category_counts['control']} to {target_count}")
-    
-        # Subset constitutive exons if they exist and not excluded
-        if not no_constitutive and 'constituitive' in category_counts and category_counts['constituitive'] > target_count > 0:
-            const_indices = df_rmats[df_rmats['category'] == 'constituitive'].index
-            # Randomly select indices to keep
-            const_indices_to_keep = np.random.choice(const_indices, target_count, replace=False)
-            # Create a mask for rows to drop
-            drop_mask = df_rmats.index.isin(const_indices) & ~df_rmats.index.isin(const_indices_to_keep)
-            # Drop the rows
-            df_rmats = df_rmats[~drop_mask]
-            logging.info(f"Randomly subsetted constitutive exons from {category_counts['constituitive']} to {target_count}")
+        # Apply subsetting for the plotting (unless disabled with --no_subset)
+        if not no_subset:
+            # Get the count of each category
+            category_counts = df_rmats['category'].value_counts()
+            # Store original counts
+            original_counts = {cat: count for cat, count in category_counts.items()}
+        
+            # Find the maximum count of enhanced or silenced
+            target_count = 0
+            if 'enhanced' in category_counts and 'silenced' in category_counts:
+                target_count = max(category_counts['enhanced'], category_counts['silenced'])
+            elif 'enhanced' in category_counts:
+                target_count = category_counts['enhanced']
+            elif 'silenced' in category_counts:
+                target_count = category_counts['silenced']
+        
+            # Subset control exons
+            if 'control' in category_counts and category_counts['control'] > target_count > 0:
+                control_indices = df_rmats[df_rmats['category'] == 'control'].index
+                # Randomly select indices to keep
+                control_indices_to_keep = np.random.choice(control_indices, target_count, replace=False)
+                # Create a mask for rows to drop
+                drop_mask = df_rmats.index.isin(control_indices) & ~df_rmats.index.isin(control_indices_to_keep)
+                # Drop the rows
+                df_rmats = df_rmats[~drop_mask]
+                logging.info(f"Randomly subsetted control exons from {category_counts['control']} to {target_count}")
+        
+            # Subset constitutive exons if they exist and not excluded
+            if not no_constitutive and 'constituitive' in category_counts and category_counts['constituitive'] > target_count > 0:
+                const_indices = df_rmats[df_rmats['category'] == 'constituitive'].index
+                # Randomly select indices to keep
+                const_indices_to_keep = np.random.choice(const_indices, target_count, replace=False)
+                # Create a mask for rows to drop
+                drop_mask = df_rmats.index.isin(const_indices) & ~df_rmats.index.isin(const_indices_to_keep)
+                # Drop the rows
+                df_rmats = df_rmats[~drop_mask]
+                logging.info(f"Randomly subsetted constitutive exons from {category_counts['constituitive']} to {target_count}")
+        else:
+            logging.info("Subsetting disabled (--no_subset flag provided)")
 
         exon_categories = df_rmats.groupby('category').size()
 
@@ -1723,6 +1729,7 @@ if __name__=='__main__':
         multivalency,
         germsdir,
         no_constitutive,
+        no_subset,
         prefix
     ) = cli()
     
@@ -1731,7 +1738,7 @@ if __name__=='__main__':
 
     try:
         run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing, 
-            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive, prefix)
+            min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_folder, multivalency, germsdir, no_constitutive, no_subset, prefix)
     finally:
         # Log runtime at the end
         log_runtime(start_time, logger)
