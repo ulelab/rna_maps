@@ -495,6 +495,9 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
                 logging.info(f"Randomly subsetted constitutive exons from {category_counts['constituitive']} to {target_count}")
         else:
             logging.info("Subsetting disabled (--no_subset flag provided)")
+            # Still need original_counts for legend (no subsetting means original = current)
+            category_counts = df_rmats['category'].value_counts()
+            original_counts = {cat: count for cat, count in category_counts.items()}
 
         exon_categories = df_rmats.groupby('category').size()
 
