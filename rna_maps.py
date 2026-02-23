@@ -400,7 +400,10 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, no_subset, all_sites, prefix
        #n_exons = 150, n_samples = 300, z_test=False
        ):
-    FILEname = prefix + "_" + de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
+    if prefix:
+        FILEname = prefix + "_" + de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
+    else:
+        FILEname = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
     df_fai = pd.read_csv(fai, sep='\t', header=None)
     chroms = set(df_fai[0].values)
     rmats = pd.read_csv(de_file, sep='\t')
