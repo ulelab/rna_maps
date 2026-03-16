@@ -506,8 +506,12 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         ####### Exon lengths #######
         df_rmats["regulated_exon_length"] = df_rmats['exonEnd'] - df_rmats['exonStart_0base']
-        df_rmats["upstream_exon_length"] = df_rmats['upstreamEE'] - df_rmats['upstreamES']
-        df_rmats["downstream_exon_length"] = df_rmats['downstreamEE'] - df_rmats['downstreamES']
+        df_rmats["first_exon_length"] = df_rmats['upstreamEE'] - df_rmats['upstreamES']
+        df_rmats["second_exon_length"] = df_rmats['downstreamEE'] - df_rmats['downstreamES']
+        df_rmats.loc[df_rmats.strand=='+', 'upstream_exon_length'] =  df_rmats["first_exon_length"]
+        df_rmats.loc[df_rmats.strand=='-', 'upstream_exon_length'] =  df_rmats["second_exon_length"]
+        df_rmats.loc[df_rmats.strand=='+', 'downstream_exon_length'] =  df_rmats["second_exon_length"]
+        df_rmats.loc[df_rmats.strand=='-', 'downstream_exon_length'] =  df_rmats["first_exon_length"]
 
         exon_length_df = df_rmats[["regulated_exon_length","upstream_exon_length","downstream_exon_length","category"]]
 
@@ -538,11 +542,11 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         middle_3ss_bed = get_ss_bed(df_rmats,'exonStart_0base','exonEnd')
         middle_5ss_bed = get_ss_bed(df_rmats,'exonEnd','exonStart_0base')
-        downstream_3ss_bed = get_ss_bed(df_rmats,'downstreamES','downstreamEE')
-        upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','upstreamES')
+        downstream_3ss_bed = get_ss_bed(df_rmats,'downstreamES','upstreamEE')
+        upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','downstreamES')
         if all_sites:
-            downstream_5ss_bed = get_ss_bed(df_rmats,'downstreamEE','downstreamES')
-            upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','upstreamEE')
+            downstream_5ss_bed = get_ss_bed(df_rmats,'downstreamEE','upstreamES')
+            upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','downstreamEE')
 
         if xl_bed is not None:
             middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
