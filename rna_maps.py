@@ -400,7 +400,10 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
         min_ctrl, max_ctrl, max_inclusion, max_fdr, max_enh, min_sil, output_dir, multivalency, germsdir, no_constitutive, no_subset, all_sites, prefix
        #n_exons = 150, n_samples = 300, z_test=False
        ):
-    FILEname = prefix + "_" + de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
+    if prefix:
+        FILEname = prefix + "_" + de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
+    else:
+        FILEname = de_file.split('/')[-1].replace('.txt', '').replace('.gz', '')
     df_fai = pd.read_csv(fai, sep='\t', header=None)
     chroms = set(df_fai[0].values)
     rmats = pd.read_csv(de_file, sep='\t')
@@ -506,8 +509,12 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         ####### Exon lengths #######
         df_rmats["regulated_exon_length"] = df_rmats['exonEnd'] - df_rmats['exonStart_0base']
-        df_rmats["upstream_exon_length"] = df_rmats['upstreamEE'] - df_rmats['upstreamES']
-        df_rmats["downstream_exon_length"] = df_rmats['downstreamEE'] - df_rmats['downstreamES']
+        df_rmats["first_exon_length"] = df_rmats['upstreamEE'] - df_rmats['upstreamES']
+        df_rmats["second_exon_length"] = df_rmats['downstreamEE'] - df_rmats['downstreamES']
+        df_rmats.loc[df_rmats.strand=='+', 'upstream_exon_length'] =  df_rmats["first_exon_length"]
+        df_rmats.loc[df_rmats.strand=='-', 'upstream_exon_length'] =  df_rmats["second_exon_length"]
+        df_rmats.loc[df_rmats.strand=='+', 'downstream_exon_length'] =  df_rmats["second_exon_length"]
+        df_rmats.loc[df_rmats.strand=='-', 'downstream_exon_length'] =  df_rmats["first_exon_length"]
 
         exon_length_df = df_rmats[["regulated_exon_length","upstream_exon_length","downstream_exon_length","category"]]
 
@@ -538,11 +545,11 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
         middle_3ss_bed = get_ss_bed(df_rmats,'exonStart_0base','exonEnd')
         middle_5ss_bed = get_ss_bed(df_rmats,'exonEnd','exonStart_0base')
-        downstream_3ss_bed = get_ss_bed(df_rmats,'downstreamES','downstreamEE')
-        upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','upstreamES')
+        downstream_3ss_bed = get_ss_bed(df_rmats,'downstreamES','upstreamEE')
+        upstream_5ss_bed = get_ss_bed(df_rmats,'upstreamEE','downstreamES')
         if all_sites:
-            downstream_5ss_bed = get_ss_bed(df_rmats,'downstreamEE','downstreamES')
-            upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','upstreamEE')
+            downstream_5ss_bed = get_ss_bed(df_rmats,'downstreamEE','upstreamES')
+            upstream_3ss_bed = get_ss_bed(df_rmats,'upstreamES','downstreamEE')
 
         if xl_bed is not None:
             middle_3ss = get_coverage_plot(xl_bed, middle_3ss_bed, fai, window, exon_categories, 'middle_3ss')
