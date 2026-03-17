@@ -427,25 +427,22 @@ def run_rna_map(de_file, xl_bed, genome_fasta, fai, window, smoothing,
 
 
         # then apply hierarchy to decide which category exons belong to
-        if no_constitutive:
-            conditions = [
-                (df_rmats["dPSI"].gt(min_sil) & df_rmats["FDR"].lt(max_fdr)), # silenced
-                (df_rmats["dPSI"].lt(max_enh) & df_rmats["FDR"].lt(max_fdr)), # enhanced
-                (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl))# control
-            ]
-            choices = ["silenced", "enhanced", "control"]
-        else:
-            conditions = [
-                (df_rmats["dPSI"].gt(min_sil) & df_rmats["FDR"].lt(max_fdr)), # silenced
-                (df_rmats["dPSI"].lt(max_enh) & df_rmats["FDR"].lt(max_fdr)), # enhanced
-                (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl) & df_rmats["maxPSI"].gt(max_inclusion)), # constituitive
-                (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl))# control
-            ]
-            choices = ["silenced", "enhanced", "constituitive", "control"]
+        conditions = [
+            (df_rmats["dPSI"].gt(min_sil) & df_rmats["FDR"].lt(max_fdr)), # silenced
+            (df_rmats["dPSI"].lt(max_enh) & df_rmats["FDR"].lt(max_fdr)), # enhanced
+            (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl) & df_rmats["maxPSI"].gt(max_inclusion)), # constituitive
+            (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl))# control
+        ]
+
+        choices = ["silenced", "enhanced", "constituitive", "control"]
 
         df_rmats["category"] = np.select(conditions, choices, default=None)
 
         df_rmats.to_csv(f'{output_dir}/{FILEname}_RMATS_with_categories.tsv', sep="\t")
+
+        # Filter out constitutive exons from plotting if requested (they're still saved in the TSV above)
+        if no_constitutive:
+            df_rmats = df_rmats[df_rmats['category'] != 'constituitive']
 
         exon_categories = df_rmats.groupby('category').size()
         #exon_categories.columns = ["name", "exon_number"]
