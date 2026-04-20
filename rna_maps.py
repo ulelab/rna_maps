@@ -332,22 +332,30 @@ def load_vastdb_data(enhanced_file, silenced_file, control_file,
     constitutive_ids = read_id_list(constitutive_file, 'constitutive')
 
     all_ids = enhanced_ids + silenced_ids + control_ids + constitutive_ids
-
-    if len(all_ids) == 0:
-        raise ValueError("No EVENT IDs provided in any file!")
-
-    logging.info(f"Total EVENT IDs: {len(all_ids)}")
-
+    logging.info(f"Total EVENT IDs (with duplicates): {len(all_ids)}")
+    
+    # Check for duplicates
+    unique_ids = set(all_ids)
+    if len(unique_ids) < len(all_ids):
+        n_duplicates = len(all_ids) - len(unique_ids)
+        logging.warning(f"\n⚠️  Found {n_duplicates} duplicate EVENT IDs across categories!")
+    
     # Create ID to category mapping
     id_to_category = {}
-    for eid in enhanced_ids:
-        id_to_category[eid] = 'enhanced'
-    for eid in silenced_ids:
-        id_to_category[eid] = 'silenced'
-    for eid in control_ids:
-        id_to_category[eid] = 'control'
+ # Start with lowest priority
     for eid in constitutive_ids:
-        id_to_category[eid] = 'constituitive'  # Match original spelling
+        id_to_category[eid] = 'constituitive'
+    
+    for eid in control_ids:
+        id_to_category[eid] = 'control'  # Overwrites constitutive if duplicate
+    
+    for eid in silenced_ids:
+        id_to_category[eid] = 'silenced'  # Overwrites control/constitutive
+    
+    for eid in enhanced_ids:
+        id_to_category[eid] = 'enhanced'  # Overwrites all others (highest priority)
+    
+    logging.info(f"Unique EVENT IDs after deduplication: {len(id_to_category)}")
 
     # Load EVENT_INFO
     logging.info(f"Loading EVENT_INFO: {event_info_file}")
@@ -364,6 +372,32 @@ def load_vastdb_data(enhanced_file, silenced_file, control_file,
     n_total = len(all_ids)
     logging.info(f"Matched {n_matched}/{n_total} IDs to coordinates "
                  f"({100 * n_matched / n_total:.1f}%)")
+    
+
+    # ========== ADD THIS DIAGNOSTIC ==========
+    # Find which IDs were NOT matched
+    matched_ids = set(event_coords_subset['EVENT'])
+    missing_ids = set(all_ids) - matched_ids
+
+    if len(missing_ids) > 0:
+        logging.warning(f"\n⚠️  {len(missing_ids)} IDs not found in EVENT_INFO!")
+    
+        # Count missing by category
+        missing_by_cat = {}
+        for eid in missing_ids:
+            cat = id_to_category[eid]
+            missing_by_cat[cat] = missing_by_cat.get(cat, 0) + 1
+    
+        logging.warning("Missing IDs by category:")
+        for cat, count in missing_by_cat.items():
+            total_in_cat = len([e for e in all_ids if id_to_category[e] == cat])
+            pct = 100 * count / total_in_cat
+            logging.warning(f"  {cat}: {count}/{total_in_cat} ({pct:.1f}%)")
+     
+        # Show first few missing IDs
+        logging.warning("\nFirst 10 missing IDs:")
+        for eid in list(missing_ids)[:10]:
+            logging.warning(f"  {eid} ({id_to_category[eid]})")
 
     if n_matched == 0:
         raise ValueError("No EVENT IDs matched to coordinates!")
