@@ -5,6 +5,9 @@ import os
 
 
 def cli():
+        optional.add_argument(
+            '--y_axis', type=str, default='log10p', choices=['log10p', 'zscore'],
+            help="Y-axis for RNA map plots: 'log10p' (default) for signed -log10(p), 'zscore' for signed permutation z-score.")
     parser = argparse.ArgumentParser(
         prog='rnamaps',
         description='Plot CLIP crosslinks around regulated exons to study '

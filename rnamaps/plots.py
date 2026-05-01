@@ -256,12 +256,12 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
 
 
 def plot_rna_map(plotting_df, exon_categories, original_counts,
-                 window, all_sites, output_dir, FILEname,
-                 pvalue_method='fisher', n_perm=None):
-    """Generate the main RNA map -log10(pvalue) line plots.
 
-    When ``pvalue_method='permutation'`` the y-axis represents signed
-    -log10(empirical p) from a label-permutation test.
+                 window, all_sites, output_dir, FILEname,
+                 pvalue_method='fisher', n_perm=None, y_axis='log10p'):
+    """Generate the main RNA map line plots.
+
+    y_axis: 'log10p' (default) for signed -log10(pvalue), 'zscore' for signed permutation z-score.
     """
     sns.set(rc={'figure.figsize': (7, 5)})
     sns.set_style("whitegrid")
@@ -277,8 +277,13 @@ def plot_rna_map(plotting_df, exon_categories, original_counts,
                   "Downstream 3'SS", "Downstream 5'SS"]
         col_wrap = 6
 
+    if y_axis == 'zscore':
+        y_col = 'zscore'
+    else:
+        y_col = '-log10pvalue_smoothed'
+
     g = sns.relplot(
-        data=plotting_df, x='position', y='-log10pvalue_smoothed',
+        data=plotting_df, x='position', y=y_col,
         hue='name', col='label', facet_kws={"sharex": False},
         kind='line', col_wrap=col_wrap, height=5, aspect=4 / 5,
         col_order=col_order,
@@ -295,7 +300,9 @@ def plot_rna_map(plotting_df, exon_categories, original_counts,
         marker_ax = add_enrichment_marker(fig, ax)
 
     g.set(xlabel='')
-    if pvalue_method == 'permutation':
+    if y_axis == 'zscore':
+        ylabel = 'signed permutation z-score vs control'
+    elif pvalue_method == 'permutation':
         ylabel = 'signed -log10(empirical p) vs control'
     else:
         ylabel = '-log10(p value) enrichment / control'
