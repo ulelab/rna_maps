@@ -57,7 +57,7 @@ def plot_exon_lengths(df_rmats, output_dir, FILEname):
         kind='box', col_wrap=3, showfliers=False,
         col_order=["upstream_exon_length", "regulated_exon_length",
                     "downstream_exon_length"],
-        order=["control", "constituitive", "enhanced", "enhanced_rest",
+        order=["control", "constitutive", "enhanced", "enhanced_rest",
                "silenced", "silenced_rest"],
         palette=palette_exon_len, hue='category', legend=False
     )
