@@ -19,3 +19,5 @@ parnet
 *Rmd
 *html
 __pycache__/
+*.egg-info/
+.DS_Store

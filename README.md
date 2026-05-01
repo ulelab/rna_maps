@@ -26,6 +26,15 @@ pip install -e .
 
 After installation, the `rnamaps` command is available. You can also run the package directly with `python -m rnamaps`.
 
+Small test for rMATS mode:
+```
+python rna_maps.py \
+-i test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
+-x test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
+-f test/homosapien-hg37-chr21.fa \
+-fi test/homosapien-hg37-chr21.fa.fai
+```
+
 ### rMATS mode
 
 ```
