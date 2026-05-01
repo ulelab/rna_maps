@@ -5,6 +5,7 @@ import logging
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import pybedtools as pbt
 import seaborn as sns
 from matplotlib import colormaps
@@ -221,11 +222,17 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
         position_cols = [pos for pos in position_cols if min_pos <= pos <= max_pos]
 
         display_matrix = np.zeros((len(sorted_exon_ids), len(position_cols)))
-        for j, exon_id in enumerate(sorted_exon_ids):
-            if exon_id in pivot.index:
-                for k, pos in enumerate(position_cols):
-                    if pos in pivot.columns:
-                        display_matrix[j, k] = pivot.loc[exon_id, pos]
+        row_index = pd.Index(sorted_exon_ids)
+        col_index = pd.Index(position_cols)
+        rows_present = row_index.intersection(pivot.index, sort=False)
+        cols_present = col_index.intersection(pivot.columns, sort=False)
+
+        if len(rows_present) and len(cols_present):
+            row_pos = row_index.get_indexer(rows_present)
+            col_pos = col_index.get_indexer(cols_present)
+            display_matrix[np.ix_(row_pos, col_pos)] = pivot.loc[
+                rows_present, cols_present
+            ].to_numpy()
 
         ax = fig.add_subplot(gs[0, i + 1])
         ax.set_facecolor('none')
