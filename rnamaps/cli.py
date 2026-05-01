@@ -6,6 +6,7 @@ import os
 
 def cli():
     parser = argparse.ArgumentParser(
+        prog='rnamaps',
         description='Plot CLIP crosslinks around regulated exons to study '
                     'position-dependent impact on pre-mRNA splicing.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -13,10 +14,10 @@ def cli():
 Input modes:
 
   rMATS mode (original):
-    python rna_maps.py -i rMATS.SE.MATS.JC.txt -x CLIP.bed -f hg38.fa -fi hg38.fa.fai -o output -p PTBP1
+    rnamaps -i rMATS.SE.MATS.JC.txt -x CLIP.bed -f hg38.fa -fi hg38.fa.fai -o output -p PTBP1
 
   VastDB mode (ID lists):
-    python rna_maps.py --vastdb_mode \\
+    rnamaps --vastdb_mode \\
       --vastdb_enhanced enhanced.txt --vastdb_silenced silenced.txt \\
       --vastdb_control control.txt --vastdb_constitutive constitutive.txt \\
       --vastdb_annotation EVENT_INFO-hg38.tab \\

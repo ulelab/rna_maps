@@ -5,7 +5,7 @@ Authors: charlotte.capitanchik@crick.ac.uk; aram.amalietti@gmail.com; leomwilkin
 
 ## Overview
 
-`rna_maps.py` generates RNA maps showing positional enrichment of RBP binding (from CLIP data) around regulated exons. It supports two input modes:
+`rnamaps` generates RNA maps showing positional enrichment of RBP binding (from CLIP data) around regulated exons. It supports two input modes:
 
 1. **rMATS mode** — takes rMATS differential splicing output and auto-categorises exons from dPSI/FDR thresholds
 2. **VastDB mode** — takes pre-curated VastDB EVENT ID lists with categories already assigned
@@ -16,17 +16,20 @@ Both modes feed into the same analysis pipeline: splice site BED creation, CLIP 
 
 ## Quick Start
 
-Create a conda environment and activate it:
+Create a conda environment and install the package:
 
 ```
 conda env create -f environment.yml
 conda activate rnamaps
+pip install -e .
 ```
+
+After installation, the `rnamaps` command is available. You can also run the package directly with `python -m rnamaps`.
 
 ### rMATS mode
 
 ```
-python rna_maps.py \
+rnamaps \
   -i SE.MATS.JCEC.txt \
   -x CLIP_crosslinks.bed \
   -f genome.fa \
@@ -38,7 +41,7 @@ python rna_maps.py \
 ### VastDB mode
 
 ```
-python rna_maps.py \
+rnamaps \
   --vastdb_mode \
   --vastdb_enhanced enhanced_ids.txt \
   --vastdb_silenced silenced_ids.txt \
@@ -105,7 +108,7 @@ Standard rMATS output for skipped exons, e.g. `SE.MATS.JCEC.txt`. Must contain c
 ## Usage
 
 ```
-python rna_maps.py -h
+rnamaps -h
 
 Input modes (mutually exclusive, one required):
   -i, --inputsplice     rMATS differential splicing file (rMATS mode)
@@ -189,7 +192,7 @@ GeRMs requires: Biostrings, parallel, logger, and optparse.
 When running RNA maps with multivalency, provide the location of the germs repo with `-g`:
 
 ```
-python rna_maps.py \
+rnamaps \
   -i SE.MATS.JCEC.txt \
   -x CLIP_crosslinks.bed \
   -f genome.fa \
@@ -272,14 +275,16 @@ In VastDB mode, categories are assigned by the user before running the script. T
 These are the versions the script was developed with (pandas >= 1 introduced breaking changes):
 
 ```
-python=3.7.7
-pandas=0.24.2
-numpy=1.19.2
-pybedtools=0.8.1
-matplotlib=3.3.2
-seaborn=0.11.0
-scipy=1.3.1
+python=3.11
+pandas
+numpy
+pybedtools
+matplotlib
+seaborn
+scipy
 ```
+
+All dependencies are specified in `environment.yml` (for conda) and `pyproject.toml` (for pip).
 
 ---
 

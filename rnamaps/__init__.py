@@ -1,7 +1,7 @@
 """RNA Maps package.
 
 Generates RNA maps showing RBP binding patterns around regulated exons.
-See the top-level rna_maps.py script for the CLI entry point.
+Install with ``pip install -e .`` and run via ``rnamaps`` or ``python -m rnamaps``.
 """
 
 from rnamaps.cli import cli
