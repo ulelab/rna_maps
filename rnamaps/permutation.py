@@ -1,10 +1,13 @@
-"""Label-permutation test for position-wise CLIP enrichment.
+"""Label-permutation z-score test for position-wise CLIP enrichment.
 
-Replaces the per-position Fisher's exact test against control with an
-empirical p-value derived from randomly relabelling exons between the
-focal category (e.g. ``enhanced``) and ``control``. A cluster-based
-multiple-testing correction across the correlated positions in each
-splice-site region is also provided.
+Replaces the per-position Fisher's exact test against control with a
+standardised score derived from randomly relabelling exons between the
+focal category (e.g. ``enhanced``) and ``control``. For each position
+the observed mean-coverage difference is converted to a z-score against
+the permutation null mean and standard deviation, and a two-sided
+p-value is reported via a normal-tail approximation. This keeps the
+reported -log10(p) continuous and unbounded so it can be compared
+across datasets and peak callers.
 """
 
 from __future__ import annotations
@@ -13,9 +16,10 @@ import logging
 
 import numpy as np
 import pandas as pd
+from scipy import stats as _sstats
 
 
-# Tiny floor to avoid log10(0) when an empirical p reaches its minimum.
+# Tiny floor to avoid log10(0) at extreme z-scores.
 _PVAL_FLOOR = 1e-300
 
 
@@ -74,12 +78,29 @@ def _permutation_null(matrix: np.ndarray, is_category: np.ndarray,
     return t_obs, t_null
 
 
-def _empirical_two_sided_p(t_obs: np.ndarray, t_null: np.ndarray) -> np.ndarray:
-    """Two-sided empirical p-value with the (1 + #ge)/(B + 1) correction."""
-    abs_obs = np.abs(t_obs)
-    abs_null = np.abs(t_null)
-    ge = (abs_null >= abs_obs[None, :]).sum(axis=0)
-    return (1.0 + ge) / (1.0 + t_null.shape[0])
+def _zscore_two_sided_p(t_obs: np.ndarray, t_null: np.ndarray):
+    """Per-position z-score against the permutation null and two-sided p.
+
+    The z-score is computed as ``(t_obs - mean(t_null)) / sd(t_null)`` and
+    converted to a two-sided p-value via a standard-normal tail. The
+    permutation null for ``mean(coverage_cat) - mean(coverage_ctrl)`` is
+    well-approximated by a normal for realistic exon counts (CLT applies
+    position-wise across exons), so this gives a continuous, unbounded
+    score that does not saturate at ``1 / (B + 1)``.
+
+    Returns
+    -------
+    z : np.ndarray, shape (n_positions,)
+    pvalues : np.ndarray, shape (n_positions,)
+    """
+    mu = t_null.mean(axis=0)
+    sd = t_null.std(axis=0, ddof=1)
+    # Guard positions where the null is degenerate (e.g. zero coverage).
+    z = np.zeros_like(t_obs, dtype=np.float64)
+    valid = sd > 0
+    z[valid] = (t_obs[valid] - mu[valid]) / sd[valid]
+    pvalues = 2.0 * _sstats.norm.sf(np.abs(z))
+    return z, pvalues
 
 
 def _smooth(values: np.ndarray, smoothing: int) -> np.ndarray:
@@ -119,7 +140,7 @@ def compute_permutation_pvalues(df_per_exon: pd.DataFrame,
     plot_df : DataFrame
         Columns: name, position, label, coverage, number_exons, norm_coverage,
         control_coverage, control_number_exons, control_norm_coverage,
-        fold_change, T_obs, pvalue, -log10pvalue, -log10pvalue_smoothed.
+        fold_change, T_obs, zscore, pvalue, -log10pvalue, -log10pvalue_smoothed.
         Includes a row per (category, position) for non-control categories
         plus the control rows themselves (for legend / line continuity).
     clusters_df : DataFrame
@@ -173,11 +194,11 @@ def compute_permutation_pvalues(df_per_exon: pd.DataFrame,
             continue
 
         t_obs, t_null = _permutation_null(matrix, is_cat, n_perm, rng)
-        pvalues = _empirical_two_sided_p(t_obs, t_null)
+        z, pvalues = _zscore_two_sided_p(t_obs, t_null)
 
         signed_log10p = -np.log10(np.maximum(pvalues, _PVAL_FLOOR))
-        # Sign by direction of T_obs (positive = enriched over control).
-        signed_log10p = np.where(t_obs >= 0, signed_log10p, -signed_log10p)
+        # Sign by direction of z (positive = enriched over control).
+        signed_log10p = np.where(z >= 0, signed_log10p, -signed_log10p)
 
         smoothed = _smooth(signed_log10p, smoothing)
 
@@ -186,6 +207,7 @@ def compute_permutation_pvalues(df_per_exon: pd.DataFrame,
             'position': positions,
             'label': label,
             'T_obs': t_obs,
+            'zscore': z,
             'pvalue': pvalues,
             '-log10pvalue': signed_log10p,
             '-log10pvalue_smoothed': smoothed,
@@ -200,6 +222,7 @@ def compute_permutation_pvalues(df_per_exon: pd.DataFrame,
             'position': ctrl_positions,
             'label': label,
             'T_obs': 0.0,
+            'zscore': 0.0,
             'pvalue': 1.0,
             '-log10pvalue': 0.0,
             '-log10pvalue_smoothed': 0.0,
@@ -207,7 +230,7 @@ def compute_permutation_pvalues(df_per_exon: pd.DataFrame,
 
     if not plot_rows:
         plot_df = pd.DataFrame(columns=[
-            'name', 'position', 'label', 'T_obs', 'pvalue',
+            'name', 'position', 'label', 'T_obs', 'zscore', 'pvalue',
             '-log10pvalue', '-log10pvalue_smoothed',
         ])
     else:

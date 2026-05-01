@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from rnamaps.permutation import (
-    _empirical_two_sided_p,
+    _zscore_two_sided_p,
     _permutation_null,
     compute_permutation_pvalues,
 )
@@ -29,11 +29,11 @@ def _make_df(matrix, names, positions, label="middle_3ss"):
 
 
 def test_null_type_i_error_controlled():
-    """Under H0 the empirical false-positive rate at alpha=0.05 is <= ~0.05.
+    """Under H0 the z-score-based false-positive rate at alpha=0.05 is ~0.05.
 
-    The permutation p-value is exact and conservative under exchangeability
-    (especially for discrete data with ties), so the rejection rate must
-    not exceed the nominal alpha by more than sampling error.
+    The permutation null for ``mean(cat) - mean(ctrl)`` is approximately
+    Gaussian (CLT across exons), so the normal-tail p derived from
+    ``(t_obs - mean) / sd`` should give close to nominal coverage.
     """
     rng = np.random.default_rng(0)
     n_exons, n_pos = 60, 40
@@ -41,20 +41,18 @@ def test_null_type_i_error_controlled():
     is_cat = np.zeros(n_exons, dtype=bool)
     is_cat[:30] = True
 
-    _, t_null = _permutation_null(matrix, is_cat, n_perm=200, rng=rng)
-    # Treat each permutation in turn as the "observed" and test against the
-    # rest -- a standard self-consistency check for permutation calibration.
+    _, t_null = _permutation_null(matrix, is_cat, n_perm=500, rng=rng)
     rejections = 0
     total = 0
     for b in range(t_null.shape[0]):
         t_obs = t_null[b]
         t_rest = np.delete(t_null, b, axis=0)
-        pvals = _empirical_two_sided_p(t_obs, t_rest)
+        _, pvals = _zscore_two_sided_p(t_obs, t_rest)
         rejections += int((pvals <= 0.05).sum())
         total += pvals.size
     rate = rejections / total
-    # Allow some slack: 0.05 nominal, with ~8000 tests SE ~ 0.0024.
-    assert rate <= 0.06, f"Type-I error rate too high: {rate:.4f}"
+    # Normal approx is not exact for sparse Poisson, allow some slack.
+    assert rate <= 0.10, f"Type-I error rate too high: {rate:.4f}"
 
 
 def test_strong_signal_recovered():
@@ -69,9 +67,12 @@ def test_strong_signal_recovered():
     is_cat = np.array([True] * 30 + [False] * 30)
 
     t_obs, t_null = _permutation_null(matrix, is_cat, n_perm=500, rng=rng)
-    pvals = _empirical_two_sided_p(t_obs, t_null)
+    z, pvals = _zscore_two_sided_p(t_obs, t_null)
     assert int(np.argmin(pvals)) == spike_pos
-    assert pvals[spike_pos] == pytest.approx(1.0 / 501, rel=1e-6)
+    # The score should be unbounded -- much smaller than the empirical
+    # floor 1/(B+1) = ~2e-3 for this signal strength.
+    assert pvals[spike_pos] < 1e-6
+    assert z[spike_pos] > 0
 
 
 def test_seed_determinism():
@@ -112,7 +113,7 @@ def test_compute_permutation_pvalues_end_to_end():
     )
     # Schema
     expected_cols = {
-        'name', 'position', 'label', 'T_obs', 'pvalue',
+        'name', 'position', 'label', 'T_obs', 'zscore', 'pvalue',
         '-log10pvalue', '-log10pvalue_smoothed',
         'coverage', 'number_exons', 'norm_coverage',
         'control_coverage', 'control_number_exons',

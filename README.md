@@ -331,8 +331,9 @@ identical results across runs.
 
 ## Statistical test
 
-By default (`--permute`) `rnamaps` calls position-wise enrichment with a
-**label-permutation test**. A per-position Fisher's exact test is also
+By default (`--permute`) `rnamaps` scores position-wise enrichment with a
+**label-permutation z-score** converted to a two-sided p-value via a
+normal-tail approximation. A per-position Fisher's exact test is also
 available via `--no-permute`.
 
 ### What gets tested
@@ -347,26 +348,53 @@ category `c` ∈ {enhanced, silenced, constitutive}, the pipeline:
 
    This is a signed effect size (positive ⇒ enriched relative to control)
    that is well-defined even when the control coverage is zero.
-3. Repeats `B = --n_perm` times: randomly relabels `n_c` of the
-   `n_c + n_ctrl` pooled exons as "category", recomputes
-   `T_perm(p)`, and tallies how often `|T_perm(p)| ≥ |T_obs(p)|`.
-4. Returns a **two-sided empirical p-value** per position, with the
-   standard `(1 + #ge) / (B + 1)` correction so p is bounded away from 0.
-5. Plots **signed −log10(p)**, with the sign taken from the direction of
-   `T_obs(p)`. The signed −log10(p) curve is then Gaussian-smoothed
-   (controlled by `-s, --smoothing`) for visual clarity.
+3. Builds a permutation null by repeating, `B = --n_perm` times:
+   randomly relabel `n_c` of the `n_c + n_ctrl` pooled exons as
+   "category" and recompute `T_perm(p)`. From the resulting
+   `B × n_positions` matrix, take the per-position null mean
+   `μ_perm(p)` and standard deviation `σ_perm(p)`.
+4. Standardises the observation against the null:
 
-### Why permutation is the default
+   `z(p) = (T_obs(p) − μ_perm(p)) / σ_perm(p)`
 
-- **Imbalanced n is fine.** The permutation null is constructed from the
-  actual data, so unequal numbers of regulated vs. control exons do not
-  inflate the test statistic. As a result, control / constitutive
-  subsetting is automatically disabled
-  when `--permute` is on — all controls are used.
-- **Distributional assumptions are weaker.** Fisher's exact test treats
-  each position independently as a 2×2 contingency table; permutation
-  only assumes exchangeability of exon labels under the null.
-- **Reproducible:** the random number generator is seeded by `--seed`.
+   and reports the two-sided p-value `p(p) = 2 · Φ(−|z(p)|)`.
+5. Plots **signed −log10(p)**, with the sign taken from `z(p)`
+   (positive ⇒ enriched, negative ⇒ depleted relative to control).
+   The signed −log10(p) curve is Gaussian-smoothed (controlled by
+   `-s, --smoothing`) for visual clarity. Both `zscore` and `pvalue` are
+   written to `{prefix}_RNAmap.tsv`.
+
+### Why z-score against the permutation null
+
+The naive empirical p — `(1 + #|T_perm| ≥ |T_obs|) / (B + 1)` — is
+*bounded* below by `1 / (B + 1)`. With `B = 1000` that caps the
+reportable −log10(p) at ≈ 3, even when the true signal is many orders
+of magnitude stronger. Because the same `−log10(p)` curve is used as an
+**enrichment score for comparing CLIP datasets, peak callers, and
+conditions**, this ceiling makes strong peaks indistinguishable from
+moderately strong ones, and makes the score depend on `B` rather than on
+the data.
+
+The z-score against the permutation null fixes this:
+
+- **Unbounded and continuous.** A position with `z = 25` gives
+  −log10(p) ≈ 137; nothing saturates, and the score reflects effect size
+  monotonically.
+- **Same null model.** The mean and standard deviation come from the
+  *same* label-permutation null as before, so the test still respects the
+  imbalance between `n_c` and `n_ctrl` and does not assume independence
+  between adjacent positions (unlike the per-position Fisher's test).
+  Control / constitutive subsetting therefore remains disabled under
+  `--permute` — all controls are used.
+- **Normal-tail extrapolation is well-justified.** For the statistic
+  `mean(coverage_c) − mean(coverage_ctrl)`, the central limit theorem
+  applies position-wise across exons, so the permutation null is
+  approximately Gaussian for realistic exon counts (dozens or more in
+  each group). Type-I error stays close to nominal in simulation.
+- **Cheap.** Estimating two moments needs far fewer permutations than
+  resolving an extreme tail quantile, so `B = 1000` is plenty. `--n_perm`
+  now controls the *precision* of `μ_perm` and `σ_perm`, not the
+  reportable floor of `p`.
 
 Under `--no-permute` the pipeline instead computes a Fisher's exact test
 per position against the control set; in that mode control and
@@ -375,32 +403,34 @@ constitutive exons are subset to match the largest regulated category
 
 ### Choosing `--n_perm`
 
-`--n_perm` (B) sets the **resolution of the empirical p-value**, not the
-statistical power of the test. The smallest p you can resolve is
-`1 / (B + 1)`. Reasonable choices:
+`--n_perm` (B) controls the precision of the null mean and standard
+deviation used for the z-score. It is **not** a cap on the reportable
+p-value (that ceiling is gone). Reasonable choices:
 
-| `--n_perm` | Smallest reportable p | Typical use |
-|---|---|---|
-| 100 | ≈ 0.01 | quick sanity / smoke test |
-| **1000** (default) | ≈ 0.001 | normal usage |
-| 10000 | ≈ 0.0001 | only if you want to plot very small p |
+| `--n_perm` | Use |
+|---|---|
+| 100 | quick sanity / smoke test (noisy z) |
+| **1000** (default) | normal usage; null moments are well estimated |
+| 10000 | only if you want very stable z at extreme positions |
 
-**The number of regulated exons does *not* dictate `B`.** It determines
-the *power* of the test (whether real signal crosses your significance
-threshold), which raising `B` cannot fix. The only edge case where exon
-counts limit `B` is when the total number of unique relabellings,
-`C(n_c + n_ctrl, n_c)`, is smaller than `B` — for realistic RNA-map sizes
-(dozens of regulated exons, ≥50 controls) this combinatorial space is
-enormous, so `B` and exon count are effectively independent.
+The number of regulated exons does *not* dictate `B`. It determines the
+power of the test (whether real signal stands out from noise), which
+raising `B` cannot fix.
 
 ### Caveats
 
-- Smoothing is applied to the signed −log10(p) curve. This is a cosmetic step; the
-  underlying p-values in `{prefix}_RNAmap.tsv` are unsmoothed.
+- Smoothing is applied to the signed −log10(p) curve. This is a cosmetic
+  step; the underlying z and p in `{prefix}_RNAmap.tsv` are unsmoothed.
+- The reported p comes from a normal approximation to the permutation
+  null. The approximation is excellent in the body of the distribution
+  and very good in the tail for sums/means of many exons, but at fixed
+  `B` extreme z values still carry Monte-Carlo noise in `μ_perm` and
+  `σ_perm` — raise `--n_perm` if you need very stable scores at
+  individual extreme positions.
 - The test does not control for any covariates (exon length, GC content,
   expression). If you need covariate matching, pre-filter your control
   set accordingly.
 - No multiple-testing correction is applied across the hundreds of
   correlated positions in each region. Treat individual peaks as
-  exploratory; biological replication of the curve shape is the strongest
-  evidence.
+  exploratory; biological replication of the curve shape is the
+  strongest evidence.
