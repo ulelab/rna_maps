@@ -102,7 +102,7 @@ def load_vastdb_data(enhanced_file, silenced_file, control_file,
     # Create ID to category mapping (priority: enhanced > silenced > control > constitutive)
     id_to_category = {}
     for eid in constitutive_ids:
-        id_to_category[eid] = 'constituitive'
+        id_to_category[eid] = 'constitutive'
 
     for eid in control_ids:
         id_to_category[eid] = 'control'
