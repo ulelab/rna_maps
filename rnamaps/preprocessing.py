@@ -32,14 +32,14 @@ def apply_subsetting(df_rmats, no_constitutive):
 
     # Subset constitutive
     if (not no_constitutive
-            and 'constituitive' in category_counts
-            and category_counts['constituitive'] > target_count > 0):
-        const_indices = df_rmats[df_rmats['category'] == 'constituitive'].index
+            and 'constitutive' in category_counts
+            and category_counts['constitutive'] > target_count > 0):
+        const_indices = df_rmats[df_rmats['category'] == 'constitutive'].index
         const_keep = np.random.choice(const_indices, target_count, replace=False)
         drop_mask = df_rmats.index.isin(const_indices) & ~df_rmats.index.isin(const_keep)
         df_rmats = df_rmats[~drop_mask]
         logging.info(f"Subsetted constitutive exons from "
-                     f"{category_counts['constituitive']} to {target_count}")
+                     f"{category_counts['constitutive']} to {target_count}")
 
     return df_rmats, original_counts
 

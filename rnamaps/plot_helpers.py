@@ -14,7 +14,7 @@ def set_legend_text(legend, exon_categories, original_counts=None):
     legend.set_title("")
 
     legend_idx = 0
-    for category in ['constituitive', 'control', 'enhanced', 'silenced']:
+    for category in ['constitutive', 'control', 'enhanced', 'silenced']:
         if category in categories:
             count = exon_cat[exon_cat['name'] == category]['number_exons'].values[0]
             text = f"{category.capitalize()} ({count}"

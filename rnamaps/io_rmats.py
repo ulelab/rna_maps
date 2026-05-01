@@ -62,12 +62,12 @@ def load_rmats_data(de_file, min_ctrl, max_ctrl, max_inclusion,
          & df_rmats["maxPSI"].gt(max_inclusion)),                            # constitutive
         (df_rmats["dPSI"].gt(min_ctrl) & df_rmats["dPSI"].lt(max_ctrl)),   # control
     ]
-    choices = ["silenced", "enhanced", "constituitive", "control"]
+    choices = ["silenced", "enhanced", "constitutive", "control"]
     df_rmats["category"] = np.select(conditions, choices, default=None)
 
     # Filter out constitutive if requested
     if no_constitutive:
-        df_rmats = df_rmats[df_rmats['category'] != 'constituitive']
+        df_rmats = df_rmats[df_rmats['category'] != 'constitutive']
 
     # ---------------------------------------------------------------
     # FIX: Swap upstream/downstream for minus-strand genes.
