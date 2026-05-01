@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rnamaps"
+version = "0.1.0"
+description = "RNA maps: positional enrichment of RBP binding around regulated exons"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "numpy",
+    "pybedtools",
+    "matplotlib",
+    "seaborn",
+    "scipy",
+]
+
+[project.scripts]
+rnamaps = "rnamaps.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["rnamaps*"]
