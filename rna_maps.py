@@ -1310,6 +1310,10 @@ def run_rna_map(args):
         logging.info(f"Removed {before - after} exons with missing flanking coordinates")
         logging.info(f"Remaining: {after} exons")
 
+        # Filter out constitutive exons from plotting if requested (they're still saved in the TSV above)
+        if no_constitutive:
+            df_rmats = df_rmats[df_rmats['category'] != 'constituitive']
+
         exon_categories = df_rmats.groupby('category').size()
         logging.info("\nExons in each category:")
         logging.info(exon_categories)
