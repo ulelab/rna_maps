@@ -87,6 +87,20 @@ Input modes:
     optional.add_argument(
         '-p', '--prefix', type=str,
         help='Prefix for output files')
+    optional.add_argument(
+        '--hg38_chr_autodetect', action='store_true',
+        help='Auto-detect mismatched chromosome naming between the CLIP BED '
+             'file (-x) and the exon coordinates, and convert the BED file '
+             "using a two-column mapping file (Ensembl <-> GENCODE 'chr' "
+             'style). Default mapping file: '
+             'test/GRCh38_ensembl2gencode.txt')
+    optional.add_argument(
+        '--chr_mapping_file', type=str,
+        default=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'test', 'GRCh38_ensembl2gencode.txt'),
+        help='Two-column TSV mapping Ensembl chrom names to GENCODE chrom '
+             'names (used with --hg38_chr_autodetect)')
 
     # PERMUTATION TEST OPTIONS
     perm_group = parser.add_argument_group('Permutation test options')

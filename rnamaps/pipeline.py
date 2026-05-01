@@ -14,7 +14,11 @@ from rnamaps.logging_utils import log_runtime, setup_logging
 from rnamaps.multivalency import plot_multivalency
 from rnamaps.permutation import compute_permutation_pvalues
 from rnamaps.plots import plot_exon_lengths, plot_heatmap, plot_rna_map
-from rnamaps.preprocessing import apply_subsetting, get_ss_bed
+from rnamaps.preprocessing import (
+    apply_subsetting,
+    autodetect_and_convert_bed_chroms,
+    get_ss_bed,
+)
 
 
 def run_rna_map(args):
@@ -187,6 +191,10 @@ def run_rna_map(args):
             xl_bed = args.inputxlsites
             window = args.window
             smoothing = args.smoothing
+
+            if getattr(args, 'hg38_chr_autodetect', False):
+                xl_bed = autodetect_and_convert_bed_chroms(
+                    xl_bed, chroms, args.chr_mapping_file, output_dir)
 
             middle_3ss = get_coverage_plot(
                 xl_bed, middle_3ss_bed, fai, window, exon_categories,

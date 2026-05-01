@@ -1,9 +1,85 @@
 """Shared preprocessing: subsetting, splice-site BED creation, smoothing."""
 
 import logging
+import os
 
 import numpy as np
 import pandas as pd
+
+
+def autodetect_and_convert_bed_chroms(xl_bed, chroms, mapping_file, output_dir):
+    """
+    Auto-detect whether the chromosome naming in ``xl_bed`` matches the
+    exon/fai chromosomes (``chroms``). If not, convert chrom names using
+    the two-column ``mapping_file`` (Ensembl <-> GENCODE) and write a new
+    BED file under ``output_dir``. Returns the path to use downstream
+    (either the original or the converted file).
+
+    Conversion direction is chosen automatically based on which mapping
+    column produces more overlap with ``chroms``. Records whose chrom
+    cannot be mapped are dropped.
+    """
+    df_bed = pd.read_csv(xl_bed, sep='\t', header=None, comment='#',
+                         dtype={0: str})
+    bed_chroms = set(df_bed[0].unique())
+
+    overlap = bed_chroms & set(chroms)
+    if len(overlap) > 0 and len(overlap) >= len(bed_chroms) * 0.5:
+        logging.info(
+            f"BED chrom names already match exon coordinates "
+            f"({len(overlap)}/{len(bed_chroms)} overlap); no conversion "
+            f"needed."
+        )
+        return xl_bed
+
+    if not os.path.exists(mapping_file):
+        raise FileNotFoundError(
+            f"--hg38_chr_autodetect: chrom mapping file not found: "
+            f"{mapping_file}"
+        )
+
+    df_map = pd.read_csv(mapping_file, sep='\t', header=None,
+                         dtype=str, keep_default_na=False)
+    df_map = df_map[(df_map[0] != '') & (df_map[1] != '')]
+
+    ens2gen = dict(zip(df_map[0], df_map[1]))
+    gen2ens = dict(zip(df_map[1], df_map[0]))
+
+    mapped_ens2gen = {c for c in bed_chroms if ens2gen.get(c) in chroms}
+    mapped_gen2ens = {c for c in bed_chroms if gen2ens.get(c) in chroms}
+
+    if not mapped_ens2gen and not mapped_gen2ens:
+        raise ValueError(
+            f"--hg38_chr_autodetect: BED chrom names do not match exon "
+            f"coordinates and could not be mapped via {mapping_file}. "
+            f"BED chroms (sample): {sorted(bed_chroms)[:5]}; "
+            f"exon chroms (sample): {sorted(chroms)[:5]}"
+        )
+
+    if len(mapped_ens2gen) >= len(mapped_gen2ens):
+        chrom_map = ens2gen
+        direction = "Ensembl -> GENCODE"
+    else:
+        chrom_map = gen2ens
+        direction = "GENCODE -> Ensembl"
+
+    before = len(df_bed)
+    df_bed[0] = df_bed[0].map(chrom_map)
+    df_bed = df_bed.dropna(subset=[0])
+    after = len(df_bed)
+
+    os.makedirs(output_dir, exist_ok=True)
+    base = os.path.basename(xl_bed)
+    stem, ext = os.path.splitext(base)
+    out_path = os.path.join(output_dir, f"{stem}.chrconverted{ext or '.bed'}")
+    df_bed.to_csv(out_path, sep='\t', header=False, index=False)
+
+    logging.info(
+        f"--hg38_chr_autodetect: converted BED chrom names ({direction}) "
+        f"using {mapping_file}; kept {after}/{before} records; "
+        f"wrote {out_path}"
+    )
+    return out_path
 
 
 def apply_subsetting(df_rmats, no_constitutive):
