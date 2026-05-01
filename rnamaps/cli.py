@@ -5,31 +5,30 @@ import os
 
 
 def cli():
-    parser = argparse.ArgumentParser(
-            # ...existing code...
-            # SHARED OPTIONAL ARGUMENTS
-            optional = parser.add_argument_group('Optional arguments')
-            optional.add_argument(
-                '--y_axis', type=str, default='log10p', choices=['log10p', 'zscore'],
-                help="Y-axis for RNA map plots: 'log10p' (default) for signed -log10(p), 'zscore' for signed permutation z-score.")
-        prog='rnamaps',
-        description='Plot CLIP crosslinks around regulated exons to study '
-                    'position-dependent impact on pre-mRNA splicing.',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        parser = argparse.ArgumentParser(
+                prog='rnamaps',
+                description='Plot CLIP crosslinks around regulated exons to study '
+                                        'position-dependent impact on pre-mRNA splicing.',
+                formatter_class=argparse.RawDescriptionHelpFormatter,
+                epilog="""
 Input modes:
 
-  rMATS mode (original):
-    rnamaps -i rMATS.SE.MATS.JC.txt -x CLIP.bed -f hg38.fa -fi hg38.fa.fai -o output -p PTBP1
+    rMATS mode (original):
+        rnamaps -i rMATS.SE.MATS.JC.txt -x CLIP.bed -f hg38.fa -fi hg38.fa.fai -o output -p PTBP1
 
-  VastDB mode (ID lists):
-    rnamaps --vastdb_mode \\
-      --vastdb_enhanced enhanced.txt --vastdb_silenced silenced.txt \\
-      --vastdb_control control.txt --vastdb_constitutive constitutive.txt \\
-      --vastdb_annotation EVENT_INFO-hg38.tab \\
-      -x CLIP.bed -f hg38.fa -fi hg38.fa.fai -o output -p AQR_K562
-        """
-    )
+    VastDB mode (ID lists):
+        rnamaps --vastdb_mode \
+            --vastdb_enhanced enhanced.txt --vastdb_silenced silenced.txt \
+            --vastdb_control control.txt --vastdb_constitutive constitutive.txt \
+            --vastdb_annotation EVENT_INFO-hg38.tab \
+            -x CLIP.bed -f hg38.fa -fi hg38.fa.fai -o output -p AQR_K562
+                """
+        )
+    # SHARED OPTIONAL ARGUMENTS
+    optional = parser.add_argument_group('Optional arguments')
+    optional.add_argument(
+        '--y_axis', type=str, default='log10p', choices=['log10p', 'zscore'],
+        help="Y-axis for RNA map plots: 'log10p' (default) for signed -log10(p), 'zscore' for signed permutation z-score.")
 
     # INPUT MODE - mutually exclusive
     input_group = parser.add_mutually_exclusive_group(required=True)
