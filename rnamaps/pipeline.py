@@ -17,6 +17,7 @@ from rnamaps.plots import plot_exon_lengths, plot_heatmap, plot_rna_map
 from rnamaps.preprocessing import (
     apply_subsetting,
     autodetect_and_convert_bed_chroms,
+    autodetect_and_convert_df_chroms,
     get_ss_bed,
 )
 
@@ -86,6 +87,12 @@ def run_rna_map(args):
         # ==============================================================
         # SHARED PIPELINE: Same for both modes from here on
         # ==============================================================
+
+        # Auto-convert exon chrom naming to match fai if requested
+        if getattr(args, 'hg38_chr_autodetect', False):
+            df_rmats = autodetect_and_convert_df_chroms(
+                df_rmats, chroms, args.chr_mapping_file,
+                chr_col='chr', label='exon')
 
         # Filter to valid chromosomes
         df_rmats = df_rmats[df_rmats['chr'].isin(chroms)]

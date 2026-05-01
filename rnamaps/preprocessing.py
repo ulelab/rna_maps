@@ -7,61 +7,67 @@ import numpy as np
 import pandas as pd
 
 
-def autodetect_and_convert_bed_chroms(xl_bed, chroms, mapping_file, output_dir):
-    """
-    Auto-detect whether the chromosome naming in ``xl_bed`` matches the
-    exon/fai chromosomes (``chroms``). If not, convert chrom names using
-    the two-column ``mapping_file`` (Ensembl <-> GENCODE) and write a new
-    BED file under ``output_dir``. Returns the path to use downstream
-    (either the original or the converted file).
-
-    Conversion direction is chosen automatically based on which mapping
-    column produces more overlap with ``chroms``. Records whose chrom
-    cannot be mapped are dropped.
-    """
-    df_bed = pd.read_csv(xl_bed, sep='\t', header=None, comment='#',
-                         dtype={0: str})
-    bed_chroms = set(df_bed[0].unique())
-
-    overlap = bed_chroms & set(chroms)
-    if len(overlap) > 0 and len(overlap) >= len(bed_chroms) * 0.5:
-        logging.info(
-            f"BED chrom names already match exon coordinates "
-            f"({len(overlap)}/{len(bed_chroms)} overlap); no conversion "
-            f"needed."
-        )
-        return xl_bed
-
+def _load_chrom_mapping(mapping_file):
     if not os.path.exists(mapping_file):
         raise FileNotFoundError(
             f"--hg38_chr_autodetect: chrom mapping file not found: "
             f"{mapping_file}"
         )
-
     df_map = pd.read_csv(mapping_file, sep='\t', header=None,
                          dtype=str, keep_default_na=False)
     df_map = df_map[(df_map[0] != '') & (df_map[1] != '')]
-
     ens2gen = dict(zip(df_map[0], df_map[1]))
     gen2ens = dict(zip(df_map[1], df_map[0]))
+    return ens2gen, gen2ens
 
-    mapped_ens2gen = {c for c in bed_chroms if ens2gen.get(c) in chroms}
-    mapped_gen2ens = {c for c in bed_chroms if gen2ens.get(c) in chroms}
+
+def _pick_chrom_map(src_chroms, target_chroms, ens2gen, gen2ens, label,
+                    mapping_file):
+    """Pick which mapping direction best maps src_chroms onto target_chroms."""
+    overlap = set(src_chroms) & set(target_chroms)
+    if len(overlap) > 0 and len(overlap) >= len(set(src_chroms)) * 0.5:
+        logging.info(
+            f"{label} chrom names already match target "
+            f"({len(overlap)}/{len(set(src_chroms))} overlap); no "
+            f"conversion needed."
+        )
+        return None, None
+
+    mapped_ens2gen = {c for c in src_chroms
+                      if ens2gen.get(c) in target_chroms}
+    mapped_gen2ens = {c for c in src_chroms
+                      if gen2ens.get(c) in target_chroms}
 
     if not mapped_ens2gen and not mapped_gen2ens:
         raise ValueError(
-            f"--hg38_chr_autodetect: BED chrom names do not match exon "
-            f"coordinates and could not be mapped via {mapping_file}. "
-            f"BED chroms (sample): {sorted(bed_chroms)[:5]}; "
-            f"exon chroms (sample): {sorted(chroms)[:5]}"
+            f"--hg38_chr_autodetect: {label} chrom names do not match "
+            f"target and could not be mapped via {mapping_file}. "
+            f"{label} chroms (sample): {sorted(set(src_chroms))[:5]}; "
+            f"target chroms (sample): {sorted(set(target_chroms))[:5]}"
         )
 
     if len(mapped_ens2gen) >= len(mapped_gen2ens):
-        chrom_map = ens2gen
-        direction = "Ensembl -> GENCODE"
-    else:
-        chrom_map = gen2ens
-        direction = "GENCODE -> Ensembl"
+        return ens2gen, "Ensembl -> GENCODE"
+    return gen2ens, "GENCODE -> Ensembl"
+
+
+def autodetect_and_convert_bed_chroms(xl_bed, chroms, mapping_file, output_dir):
+    """
+    Auto-detect whether the chromosome naming in ``xl_bed`` matches the
+    fai chromosomes (``chroms``). If not, convert chrom names using the
+    two-column ``mapping_file`` (Ensembl <-> GENCODE) and write a new
+    BED file under ``output_dir``. Returns the path to use downstream
+    (either the original or the converted file).
+    """
+    df_bed = pd.read_csv(xl_bed, sep='\t', header=None, comment='#',
+                         dtype={0: str})
+    bed_chroms = set(df_bed[0].unique())
+
+    ens2gen, gen2ens = _load_chrom_mapping(mapping_file)
+    chrom_map, direction = _pick_chrom_map(
+        bed_chroms, chroms, ens2gen, gen2ens, "BED", mapping_file)
+    if chrom_map is None:
+        return xl_bed
 
     before = len(df_bed)
     df_bed[0] = df_bed[0].map(chrom_map)
@@ -80,6 +86,33 @@ def autodetect_and_convert_bed_chroms(xl_bed, chroms, mapping_file, output_dir):
         f"wrote {out_path}"
     )
     return out_path
+
+
+def autodetect_and_convert_df_chroms(df, chroms, mapping_file,
+                                     chr_col='chr', label='exon'):
+    """
+    Auto-detect whether ``df[chr_col]`` matches ``chroms`` (fai chroms).
+    If not, convert using the Ensembl<->GENCODE ``mapping_file``. Rows
+    whose chrom can't be mapped are dropped. Returns the (possibly
+    modified) DataFrame.
+    """
+    src_chroms = set(df[chr_col].astype(str).unique())
+    ens2gen, gen2ens = _load_chrom_mapping(mapping_file)
+    chrom_map, direction = _pick_chrom_map(
+        src_chroms, chroms, ens2gen, gen2ens, label, mapping_file)
+    if chrom_map is None:
+        return df
+
+    before = len(df)
+    df = df.copy()
+    df[chr_col] = df[chr_col].astype(str).map(chrom_map)
+    df = df.dropna(subset=[chr_col])
+    after = len(df)
+    logging.info(
+        f"--hg38_chr_autodetect: converted {label} chrom names "
+        f"({direction}) using {mapping_file}; kept {after}/{before} rows."
+    )
+    return df
 
 
 def apply_subsetting(df_rmats, no_constitutive):

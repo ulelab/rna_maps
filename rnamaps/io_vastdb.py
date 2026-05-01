@@ -167,8 +167,8 @@ def load_vastdb_data(enhanced_file, silenced_file, control_file,
     # Add FDR placeholder (not used but needed for column contract)
     event_coords_subset['FDR'] = 0.001
 
-    # Filter to valid chromosomes
-    event_coords_subset = event_coords_subset[event_coords_subset['chr'].isin(chroms)]
+    # NOTE: do not filter by chroms here — the pipeline does that (and
+    # may first auto-convert chrom naming via --hg38_chr_autodetect).
 
     logging.info(f"Category distribution:\n{event_coords_subset['category'].value_counts()}")
 
