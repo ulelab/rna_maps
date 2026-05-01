@@ -45,6 +45,11 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label,
     heatmap_plot = df_plot.copy()
     heatmap_plot['label'] = label
 
+    # Per-exon × per-position long-form coverage (used by permutation test).
+    # Kept before aggregation so callers can access the un-summed table.
+    df_per_exon = df_plot[['exon_id', 'name', 'position', 'coverage']].copy()
+    df_per_exon['label'] = label
+
     # Aggregate coverage
     df_plot = df_plot.groupby(
         ['name', 'position'], as_index=False
@@ -102,4 +107,4 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label,
         smoothing, center=True, win_type="gaussian"
     ).mean(std=2)
 
-    return df_plot, heatmap_plot
+    return df_plot, heatmap_plot, df_per_exon

@@ -88,6 +88,19 @@ Input modes:
         '-p', '--prefix', type=str,
         help='Prefix for output files')
 
+    # PERMUTATION TEST OPTIONS
+    perm_group = parser.add_argument_group('Permutation test options')
+    perm_group.add_argument(
+        '--permute', dest='permute', action='store_true', default=True,
+        help='Use label-permutation test for p-values [DEFAULT: on]')
+    perm_group.add_argument(
+        '--no-permute', dest='permute', action='store_false',
+        help="Disable permutation; fall back to per-position Fisher's exact "
+             "test (legacy behaviour)")
+    perm_group.add_argument(
+        '--n_perm', type=int, default=1000,
+        help='Number of label permutations [DEFAULT: 1000]')
+
     # rMATS-SPECIFIC THRESHOLDS
     rmats_group = parser.add_argument_group('rMATS mode thresholds')
     rmats_group.add_argument(

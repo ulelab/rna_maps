@@ -256,8 +256,13 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
 
 
 def plot_rna_map(plotting_df, exon_categories, original_counts,
-                 window, all_sites, output_dir, FILEname):
-    """Generate the main RNA map -log10(pvalue) line plots."""
+                 window, all_sites, output_dir, FILEname,
+                 pvalue_method='fisher', n_perm=None):
+    """Generate the main RNA map -log10(pvalue) line plots.
+
+    When ``pvalue_method='permutation'`` the y-axis represents signed
+    -log10(empirical p) from a label-permutation test.
+    """
     sns.set(rc={'figure.figsize': (7, 5)})
     sns.set_style("whitegrid")
 
@@ -276,7 +281,11 @@ def plot_rna_map(plotting_df, exon_categories, original_counts,
         data=plotting_df, x='position', y='-log10pvalue_smoothed',
         hue='name', col='label', facet_kws={"sharex": False},
         kind='line', col_wrap=col_wrap, height=5, aspect=4 / 5,
-        col_order=col_order
+        col_order=col_order,
+        hue_order=[c for c in
+                   ['constitutive', 'control', 'enhanced', 'silenced',
+                    'enhanced_rest', 'silenced_rest']
+                   if c in plotting_df['name'].unique()],
     )
 
     for ax, title in zip(g.axes.flat, titles):
@@ -286,7 +295,11 @@ def plot_rna_map(plotting_df, exon_categories, original_counts,
         marker_ax = add_enrichment_marker(fig, ax)
 
     g.set(xlabel='')
-    g.axes[0].set_ylabel('-log10(p value) enrichment / control')
+    if pvalue_method == 'permutation':
+        ylabel = 'signed -log10(empirical p) vs control'
+    else:
+        ylabel = '-log10(p value) enrichment / control'
+    g.axes[0].set_ylabel(ylabel)
 
     sns.move_legend(
         g, "upper right",
@@ -342,6 +355,11 @@ def plot_rna_map(plotting_df, exon_categories, original_counts,
             ax.add_artist(rect)
 
     plt.subplots_adjust(wspace=0.05)
+    if pvalue_method == 'permutation' and n_perm is not None:
+        g.fig.suptitle(
+            f"Label-permutation test (B={n_perm}).",
+            y=1.02, fontsize=8, color='dimgray',
+        )
     plt.savefig(
         f'{output_dir}/{FILEname}_RNAmap_-log10pvalue.pdf',
         bbox_extra_artists=([leg, rect, marker_ax]),

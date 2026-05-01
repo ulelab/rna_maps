@@ -10,7 +10,7 @@ Authors: charlotte.capitanchik@crick.ac.uk; leomwilkinson@gmail.com; aram.amalie
 1. **rMATS mode** — takes rMATS differential splicing output and auto-categorises exons from dPSI/FDR thresholds
 2. **VastDB mode** — takes pre-curated VastDB EVENT ID lists with categories already assigned
 
-Both modes feed into the same analysis pipeline: splice site BED creation, CLIP coverage calculation, Fisher's exact test enrichment, RNA map plotting, per-exon heatmaps, and exon length distributions.
+Both modes feed into the same analysis pipeline: splice site BED creation, CLIP coverage calculation, label-permutation test for positional enrichment, RNA map plotting, per-exon heatmaps, and exon length distributions.
 
 ---
 
@@ -154,11 +154,19 @@ Optional arguments:
   -o, --outputpath      Output folder [DEFAULT: current directory]
   -w, --window          Window around splice sites [DEFAULT: 300]
   -s, --smoothing       Smoothing window [DEFAULT: 15]
-  --seed                Random seed for reproducible subsetting [DEFAULT: 42]
+  --seed                Random seed for reproducible permutations / subsetting [DEFAULT: 42]
   -nc, --no_constitutive  Exclude constitutive category
   -ns, --no_subset      Disable subsetting of control/constitutive exons
+                        (subsetting is auto-disabled when --permute is on)
   -ao, --all_sites      Include all 6 splice sites (default: 4 core sites)
   -p, --prefix          Prefix for output files
+
+Permutation test options:
+  --permute / --no-permute
+                        Use label-permutation test for p-values [DEFAULT: --permute].
+                        --no-permute switches to a per-position Fisher's exact test
+                        and re-enables exon subsetting.
+  --n_perm              Number of label permutations [DEFAULT: 1000]
 
 rMATS mode thresholds:
   -mc, --minctrl        Minimum dPSI for control events [DEFAULT: -0.05]
@@ -314,4 +322,85 @@ All dependencies are specified in `environment.yml` (for conda) and `pyproject.t
 
 ## Reproducibility
 
-The `--seed` flag (default: 42) controls the random seed used when subsetting control and constitutive exons to match the size of the largest regulated category. Setting the same seed produces identical subsets across runs. Disable subsetting entirely with `--no_subset`.
+The `--seed` flag (default: 42) controls the random seed used for both the
+label-permutation test and (when `--no-permute` is in effect) the random
+subsetting of control / constitutive exons. Setting the same seed produces
+identical results across runs.
+
+---
+
+## Statistical test
+
+By default (`--permute`) `rnamaps` calls position-wise enrichment with a
+**label-permutation test**. A per-position Fisher's exact test is also
+available via `--no-permute`.
+
+### What gets tested
+
+For each splice-site region (e.g. `middle_3ss`) and each non-control
+category `c` ∈ {enhanced, silenced, constitutive}, the pipeline:
+
+1. Pools the `n_c` exons in `c` with the `n_ctrl` control exons.
+2. Computes the observed test statistic per position `p`:
+
+   `T_obs(p) = mean_coverage_c(p) − mean_coverage_ctrl(p)`
+
+   This is a signed effect size (positive ⇒ enriched relative to control)
+   that is well-defined even when the control coverage is zero.
+3. Repeats `B = --n_perm` times: randomly relabels `n_c` of the
+   `n_c + n_ctrl` pooled exons as "category", recomputes
+   `T_perm(p)`, and tallies how often `|T_perm(p)| ≥ |T_obs(p)|`.
+4. Returns a **two-sided empirical p-value** per position, with the
+   standard `(1 + #ge) / (B + 1)` correction so p is bounded away from 0.
+5. Plots **signed −log10(p)**, with the sign taken from the direction of
+   `T_obs(p)`. The signed −log10(p) curve is then Gaussian-smoothed
+   (controlled by `-s, --smoothing`) for visual clarity.
+
+### Why permutation is the default
+
+- **Imbalanced n is fine.** The permutation null is constructed from the
+  actual data, so unequal numbers of regulated vs. control exons do not
+  inflate the test statistic. As a result, control / constitutive
+  subsetting is automatically disabled
+  when `--permute` is on — all controls are used.
+- **Distributional assumptions are weaker.** Fisher's exact test treats
+  each position independently as a 2×2 contingency table; permutation
+  only assumes exchangeability of exon labels under the null.
+- **Reproducible:** the random number generator is seeded by `--seed`.
+
+Under `--no-permute` the pipeline instead computes a Fisher's exact test
+per position against the control set; in that mode control and
+constitutive exons are subset to match the largest regulated category
+(seeded by `--seed`).
+
+### Choosing `--n_perm`
+
+`--n_perm` (B) sets the **resolution of the empirical p-value**, not the
+statistical power of the test. The smallest p you can resolve is
+`1 / (B + 1)`. Reasonable choices:
+
+| `--n_perm` | Smallest reportable p | Typical use |
+|---|---|---|
+| 100 | ≈ 0.01 | quick sanity / smoke test |
+| **1000** (default) | ≈ 0.001 | normal usage |
+| 10000 | ≈ 0.0001 | only if you want to plot very small p |
+
+**The number of regulated exons does *not* dictate `B`.** It determines
+the *power* of the test (whether real signal crosses your significance
+threshold), which raising `B` cannot fix. The only edge case where exon
+counts limit `B` is when the total number of unique relabellings,
+`C(n_c + n_ctrl, n_c)`, is smaller than `B` — for realistic RNA-map sizes
+(dozens of regulated exons, ≥50 controls) this combinatorial space is
+enormous, so `B` and exon count are effectively independent.
+
+### Caveats
+
+- Smoothing is applied to the signed −log10(p) curve. This is a cosmetic step; the
+  underlying p-values in `{prefix}_RNAmap.tsv` are unsmoothed.
+- The test does not control for any covariates (exon length, GC content,
+  expression). If you need covariate matching, pre-filter your control
+  set accordingly.
+- No multiple-testing correction is applied across the hundreds of
+  correlated positions in each region. Treat individual peaks as
+  exploratory; biological replication of the curve shape is the strongest
+  evidence.
