@@ -34,6 +34,21 @@ python rna_maps.py \
 -f test/homosapien-hg37-chr21.fa \
 -fi test/homosapien-hg37-chr21.fa.fai
 ```
+Small test for VastDB mode:
+```
+rnamaps \
+  --vastdb_mode \
+  --vastdb_enhanced test/vast-tools/enhanced_ids.chr21.txt \
+  --vastdb_silenced test/vast-tools/silenced_ids.chr21.txt \
+  --vastdb_control test/vast-tools/control_ids.chr21.txt \
+  --vastdb_constitutive test/vast-tools/constitutive_ids.chr21.txt \
+  --vastdb_annotation test/vast-tools/EVENT_INFO-hg38.chr21.tab \
+  -x test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
+  -f test/homosapien-hg37-chr21.fa \
+  -fi test/homosapien-hg37-chr21.fa.fai \
+  -o output/ \
+  -p PTBP1
+```
 
 ### rMATS mode
 
