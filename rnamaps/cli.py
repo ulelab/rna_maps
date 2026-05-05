@@ -130,6 +130,35 @@ def cli():
         help="Strict mode: min FDR for control exons [DEFAULT: 0.5]"
     )
 
+    # EXPRESSION-MATCHING OPTIONS
+    expr_group = parser.add_argument_group('Expression-matching options')
+    expr_group.add_argument(
+        '--gene_tpm', type=str, default=None,
+        help='Optional 2-column gene TPM table (gene_id,tpm). '
+             'When provided, control/constitutive sets are expression-matched '
+             'to regulated exons.'
+    )
+    expr_group.add_argument(
+        '--tpm_n_bins', type=int, default=10,
+        help='Number of quantile bins for regulated log-TPM distribution '
+             '[DEFAULT: 10]'
+    )
+    expr_group.add_argument(
+        '--tpm_pseudocount', type=float, default=1.0,
+        help='Pseudocount for log10(TPM + pseudocount) transform '
+             '[DEFAULT: 1.0]'
+    )
+    expr_group.add_argument(
+        '--tpm_min_tpm', type=float, default=0.0,
+        help='Minimum TPM required before matching [DEFAULT: 0.0]'
+    )
+    expr_group.add_argument(
+        '--no_match_constitutive', action='store_true',
+        help='By default, expression matching applies to control and '
+             'constitutive sets. Use this flag to leave constitutive '
+             'untouched.'
+    )
+
     # PERMUTATION TEST OPTIONS
     perm_group = parser.add_argument_group('Permutation test options')
     perm_group.add_argument(

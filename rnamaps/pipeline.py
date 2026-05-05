@@ -11,6 +11,11 @@ from rnamaps.coverage import get_coverage_plot
 from rnamaps.enrichment import EnrichmentResult
 from rnamaps.enrichment import bootstrap_contrast as enrich_bootstrap
 from rnamaps.enrichment import cluster_perm as enrich_cluster
+from rnamaps.expression_matching import (
+    attach_tpm_to_exons,
+    load_tpm_table,
+    match_controls_by_expression,
+)
 from rnamaps.io_rmats import load_rmats_data
 from rnamaps.io_vastdb import load_vastdb_data
 from rnamaps.logging_utils import log_runtime, setup_logging
@@ -224,13 +229,33 @@ def run_rna_map(args):
             control_min_fdr=getattr(args, 'control_min_fdr', 0.5),
         )
 
+        if getattr(args, 'gene_tpm', None):
+            logging.info("\nApplying expression-aware control matching...")
+            tpm_df = load_tpm_table(args.gene_tpm)
+            df_rmats, attach_info = attach_tpm_to_exons(df_rmats, tpm_df)
+            logging.info(f"TPM attachment summary: {attach_info}")
+            df_rmats, match_summary = match_controls_by_expression(
+                df_rmats,
+                n_bins=getattr(args, 'tpm_n_bins', 10),
+                pseudocount=getattr(args, 'tpm_pseudocount', 1.0),
+                min_tpm=getattr(args, 'tpm_min_tpm', 0.0),
+                also_constitutive=not getattr(
+                    args, 'no_match_constitutive', False
+                ),
+                rng=rng,
+            )
+            logging.info(f"Expression-matching summary: {match_summary}")
+
         exon_categories = df_rmats.groupby('category').size()
         logging.info("\nExons in each category:")
         logging.info(exon_categories)
 
         # Validate categories
         if "control" not in exon_categories or exon_categories.loc["control"] == 0:
-            logging.error("No control exons found!")
+            logging.error(
+                "No control exons found! If using --gene_tpm, relax "
+                "--tpm_min_tpm and/or reduce --tpm_n_bins."
+            )
             sys.exit(1)
 
         if ("enhanced" not in exon_categories
@@ -267,13 +292,14 @@ def run_rna_map(args):
         # Save categorised exons
         if input_mode == 'rmats':
             save_cols = ['chr', 'exonStart_0base', 'exonEnd', 'strand', 'category',
-                         'FDR', 'dPSI', 'maxPSI',
+                         'FDR', 'dPSI', 'maxPSI', 'GeneID', 'geneSymbol',
+                         'gene_id', 'tpm',
                          'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE']
             save_cols = [c for c in save_cols if c in df_rmats.columns]
             suffix = '_RMATS_with_categories.tsv'
         else:
             save_cols = ['chr', 'exonStart_0base', 'exonEnd', 'strand', 'category',
-                         'EVENT', 'GENE',
+                         'EVENT', 'GENE', 'gene_id', 'tpm',
                          'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE']
             save_cols = [c for c in save_cols if c in df_rmats.columns]
             suffix = '_VastDB_with_categories.tsv'

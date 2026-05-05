@@ -104,7 +104,7 @@ This mode is useful when categories come from VAST-TOOLS `vast diff` output (or 
 | Coordinate source | rMATS columns | VastDB `EVENT_INFO` file |
 | Coordinate system | 0-based (BED) | 1-based (converted automatically) |
 | rMATS dependency | Required | Not required |
-| Expression filtering | From junction counts | Not applicable |
+| Expression matching (`--gene_tpm`) | Supported | Supported |
 
 ---
 
@@ -174,6 +174,16 @@ Control-set hygiene options:
                           category and relabel constitutive -> control.
   --control_max_dpsi    Strict mode: max |dPSI| [DEFAULT: 0.01]
   --control_min_fdr     Strict mode: min FDR    [DEFAULT: 0.5]
+
+Expression-matching options:
+  --gene_tpm            Optional 2-column table (gene_id, tpm). When set,
+                        control/constitutive pools are expression-matched
+                        to regulated exons.
+  --tpm_n_bins          Quantile bins for regulated log-TPM [DEFAULT: 10]
+  --tpm_pseudocount     Pseudocount for log10(TPM+p) [DEFAULT: 1.0]
+  --tpm_min_tpm         Drop rows with TPM below this value [DEFAULT: 0.0]
+  --no_match_constitutive
+                        Match only control (leave constitutive unchanged)
 
 Permutation test options:
   --permute / --no-permute
@@ -477,6 +487,28 @@ modes:
 In VastDB mode, `strict` is partially applicable (no FDR column) and
 will fall back to the dPSI cutoff with a warning. `constitutive_only`
 works in both modes.
+
+---
+
+## Expression matching
+
+When you provide `--gene_tpm`, RNA maps additionally filters the negative
+set so that gene-expression levels are similar between regulated exons
+(`enhanced` + `silenced`) and the comparison pool (`control` and, by
+default, `constitutive`).
+
+The current implementation uses quantile-stratified matching:
+
+- It loads a gene-level TPM table (`gene_id`, `tpm`), auto-detects whether
+  IDs overlap best as Ensembl IDs or symbols, and attaches TPM to each exon.
+- It computes `log10(TPM + --tpm_pseudocount)` and bins regulated exons
+  into `--tpm_n_bins` quantiles.
+- It subsamples control (and constitutive unless
+  `--no_match_constitutive`) to match those regulated-bin proportions as
+  closely as possible.
+
+This step runs after `--control_set` hygiene and before any enrichment
+method, and is available in both rMATS and VastDB modes.
 
 ---
 

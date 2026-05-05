@@ -1,6 +1,7 @@
 """Track 1 input loader: rMATS differential splicing output."""
 
 import logging
+import re
 
 import numpy as np
 import pandas as pd
@@ -39,14 +40,28 @@ def load_rmats_data(de_file, min_ctrl, max_ctrl, max_inclusion,
         lambda x: max([float(y) for y in x if y != 'NA'])
     )
 
-    df_rmats = rmats.loc[:, [
+    core_cols = [
         'chr', 'exonStart_0base', 'exonEnd', 'FDR', 'IncLevelDifference',
         'strand', 'inclusion',
         'upstreamES', 'upstreamEE', 'downstreamES', 'downstreamEE'
-    ]].rename(columns={
+    ]
+    optional_cols = [c for c in ['GeneID', 'geneSymbol'] if c in rmats.columns]
+    keep_cols = core_cols + optional_cols
+
+    df_rmats = rmats.loc[:, keep_cols].rename(columns={
         'IncLevelDifference': 'dPSI',
         'inclusion': 'maxPSI'
     }).reset_index()
+
+    if 'GeneID' in df_rmats.columns:
+        df_rmats['GeneID'] = (
+            df_rmats['GeneID']
+            .astype(str)
+            .str.strip()
+            .str.strip('"')
+            .str.strip("'")
+            .map(lambda x: re.sub(r"\.\d+$", "", x))
+        )
 
     # Deduplicate: keep the most extreme dPSI per exon
     mask = df_rmats.groupby(
