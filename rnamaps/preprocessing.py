@@ -115,6 +115,89 @@ def autodetect_and_convert_df_chroms(df, chroms, mapping_file,
     return df
 
 
+def apply_control_set(df_rmats, mode, control_max_dpsi=0.01,
+                      control_min_fdr=0.5):
+    """Apply control-set hygiene mode after categories have been assigned.
+
+    Parameters
+    ----------
+    df_rmats : pd.DataFrame
+        Categorised exons with at least the ``category`` column.
+    mode : str
+        One of ``"default"`` (no-op), ``"strict"`` (tighten the control
+        category to ``|dPSI| < control_max_dpsi`` AND
+        ``FDR > control_min_fdr``), or ``"constitutive_only"`` (drop
+        existing controls and relabel ``constitutive`` to ``control``).
+    control_max_dpsi : float
+    control_min_fdr : float
+
+    Returns
+    -------
+    pd.DataFrame
+    """
+    if mode == "default":
+        return df_rmats
+
+    df = df_rmats.copy()
+
+    if mode == "strict":
+        ctrl_mask = df['category'] == 'control'
+        n_before = int(ctrl_mask.sum())
+        if n_before == 0:
+            logging.info("[control_set=strict] No control rows to filter.")
+            return df
+
+        keep = pd.Series(True, index=df.index)
+        if 'dPSI' in df.columns:
+            keep_strict = df['dPSI'].abs() < control_max_dpsi
+        else:
+            logging.warning(
+                "[control_set=strict] No dPSI column (e.g. VastDB mode); "
+                "dPSI cutoff cannot be applied."
+            )
+            keep_strict = pd.Series(True, index=df.index)
+
+        if 'FDR' in df.columns and df.loc[ctrl_mask, 'FDR'].nunique() > 1:
+            keep_strict = keep_strict & (df['FDR'] > control_min_fdr)
+        else:
+            logging.warning(
+                "[control_set=strict] FDR column missing or constant "
+                "(e.g. VastDB placeholder); FDR cutoff cannot be applied."
+            )
+
+        drop_ctrl = ctrl_mask & ~keep_strict
+        df = df[~drop_ctrl]
+        n_after = int((df['category'] == 'control').sum())
+        logging.info(
+            f"[control_set=strict] kept {n_after}/{n_before} control "
+            f"exons (|dPSI|<{control_max_dpsi}, FDR>{control_min_fdr})."
+        )
+        return df
+
+    if mode == "constitutive_only":
+        n_ctrl = int((df['category'] == 'control').sum())
+        n_const = int((df['category'] == 'constitutive').sum())
+        if n_const == 0:
+            raise ValueError(
+                "[control_set=constitutive_only] No 'constitutive' exons "
+                "available to use as control. Re-run with `--control_set "
+                "default` or `strict`, or remove `-nc/--no_constitutive`."
+            )
+        df = df[df['category'] != 'control'].copy()
+        df.loc[df['category'] == 'constitutive', 'category'] = 'control'
+        logging.info(
+            f"[control_set=constitutive_only] dropped {n_ctrl} original "
+            f"control exons; relabelled {n_const} constitutive exons "
+            f"as control."
+        )
+        return df
+
+    raise ValueError(
+        f"Unknown --control_set mode: {mode!r}. Expected one of "
+        f"'default', 'strict', 'constitutive_only'."
+    )
+
+
 def apply_subsetting(df_rmats, no_constitutive):
     """
     Subset control and constitutive exons to match the largest regulated

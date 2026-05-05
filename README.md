@@ -10,7 +10,7 @@ Authors: charlotte.capitanchik@crick.ac.uk; leomwilkinson@gmail.com; aram.amalie
 1. **rMATS mode** — takes rMATS differential splicing output and auto-categorises exons from dPSI/FDR thresholds
 2. **VastDB mode** — takes pre-curated VastDB EVENT ID lists with categories already assigned
 
-Both modes feed into the same analysis pipeline: splice site BED creation, CLIP coverage calculation, label-permutation test for positional enrichment, RNA map plotting, per-exon heatmaps, and exon length distributions.
+Both modes feed into the same analysis pipeline: splice site BED creation, CLIP coverage calculation, one or more enrichment analyses (bootstrap contrast / cluster permutation / legacy Fisher / legacy permutation z-score), RNA map plotting, per-exon heatmaps, and exon length distributions.
 
 ---
 
@@ -28,7 +28,7 @@ After installation, the `rnamaps` command is available. You can also run the pac
 
 Small test for rMATS mode:
 ```
-python rna_maps.py \
+rnamaps \
 -i test/chr21_PTBP1_2_Gueroussov2015_SE.MATS.JCEC.txt \
 -x test/chr21_hela_ptbp1_iclip_sorted_merged.bed \
 -f test/homosapien-hg37-chr21.fa \
@@ -157,16 +157,45 @@ Optional arguments:
   --seed                Random seed for reproducible permutations / subsetting [DEFAULT: 42]
   -nc, --no_constitutive  Exclude constitutive category
   -ns, --no_subset      Disable subsetting of control/constitutive exons
-                        (subsetting is auto-disabled when --permute is on)
+                        (subsetting is auto-disabled for any non-fisher method)
   -ao, --all_sites      Include all 6 splice sites (default: 4 core sites)
   -p, --prefix          Prefix for output files
+  --enrichment          One or more of {bootstrap_contrast, cluster_perm,
+                        permutation_z, fisher} [DEFAULT: bootstrap_contrast].
+                        See "Enrichment methods" below.
+  --y_axis              Y-axis for legacy permutation_z plot:
+                        log10p (default) or zscore.
+
+Control-set hygiene options:
+  --control_set         {default, strict, constitutive_only} [DEFAULT: default].
+                        - strict: tighten control to |dPSI|<--control_max_dpsi
+                          AND FDR>--control_min_fdr.
+                        - constitutive_only: drop the original control
+                          category and relabel constitutive -> control.
+  --control_max_dpsi    Strict mode: max |dPSI| [DEFAULT: 0.01]
+  --control_min_fdr     Strict mode: min FDR    [DEFAULT: 0.5]
 
 Permutation test options:
   --permute / --no-permute
-                        Use label-permutation test for p-values [DEFAULT: --permute].
-                        --no-permute switches to a per-position Fisher's exact test
-                        and re-enables exon subsetting.
+                        Legacy switch retained for backward compatibility.
+                        --no-permute is equivalent to --enrichment fisher
+                        when --enrichment is not given.
   --n_perm              Number of label permutations [DEFAULT: 1000]
+                        (used by permutation_z and cluster_perm)
+
+Bootstrap contrast options (--enrichment bootstrap_contrast):
+  --n_boot              Bootstrap iterations [DEFAULT: 1000]
+  --bootstrap_control_fixed
+                        Treat control mean as a constant (skip resampling
+                        control). Equivalent to full bootstrap up to
+                        negligible variance when n_ctrl >> n_cat.
+  --pseudocount         Override adaptive log2FC pseudocount with a fixed
+                        value [DEFAULT: adaptive].
+  --pseudocount_frac    Adaptive pseudocount fraction of the regional
+                        control coverage median [DEFAULT: 0.01].
+
+Cluster-permutation options (--enrichment cluster_perm):
+  --cluster_thresh      Cluster-defining |t| threshold [DEFAULT: 2.0]
 
 rMATS mode thresholds:
   -mc, --minctrl        Minimum dPSI for control events [DEFAULT: -0.05]
@@ -185,17 +214,26 @@ Multivalency analysis:
 
 ## Outputs
 
-Both modes produce the same set of output files:
+Both modes produce a common set of files plus per-method enrichment outputs.
+
+Always produced:
 
 | File | Description |
 |---|---|
 | `{prefix}_RMATS_with_categories.tsv` or `{prefix}_VastDB_with_categories.tsv` | Categorised exons with coordinates |
-| `{prefix}_RNAmap.tsv` | Per-position coverage and enrichment data |
-| `{prefix}_RNAmap_-log10pvalue.pdf` | RNA map line plot |
 | `{prefix}_heatmap.pdf` | Per-exon binary coverage heatmap |
 | `{prefix}_totalExonsCovered.tsv` | Count of exons with CLIP signal per region and category |
 | `{prefix}_exon_length.pdf` | Exon length distributions by category |
 | `execution_*.log` | Run log with timing and category counts |
+
+Per enrichment method (one set per method passed to `--enrichment`):
+
+| Method | Files |
+|---|---|
+| `bootstrap_contrast` | `{prefix}_RNAmap_bootstrap_contrast.tsv`, `{prefix}_RNAmap_delta.pdf`, `{prefix}_RNAmap_log2fc.pdf` |
+| `cluster_perm` | `{prefix}_RNAmap_cluster_perm.tsv`, `{prefix}_RNAmap_cluster_perm_clusters.tsv`, `{prefix}_RNAmap_cluster_perm.pdf` |
+| `permutation_z` | `{prefix}_RNAmap_permutation_z.tsv`, `{prefix}_RNAmap_permutation_z.pdf` |
+| `fisher` | `{prefix}_RNAmap_fisher.tsv`, `{prefix}_RNAmap_fisher.pdf` |
 
 With `--multivalency` (rMATS mode):
 
@@ -322,115 +360,143 @@ All dependencies are specified in `environment.yml` (for conda) and `pyproject.t
 
 ## Reproducibility
 
-The `--seed` flag (default: 42) controls the random seed used for both the
-label-permutation test and (when `--no-permute` is in effect) the random
-subsetting of control / constitutive exons. Setting the same seed produces
-identical results across runs.
+The `--seed` flag (default: 42) controls the random seed used by all
+methods that resample (bootstrap_contrast, cluster_perm, permutation_z)
+and by the legacy random subsetting of control / constitutive exons.
+Setting the same seed produces identical results across runs.
 
 ---
 
-## Statistical test
+## Enrichment methods
 
-By default (`--permute`) `rnamaps` scores position-wise enrichment with a
-**label-permutation z-score** converted to a two-sided p-value via a
-normal-tail approximation. A per-position Fisher's exact test is also
-available via `--no-permute`.
+`rnamaps` supports several enrichment methods, selected (one or more) via
+`--enrichment`. The default is `bootstrap_contrast`.
 
-### What gets tested
+### Decision table
 
-For each splice-site region (e.g. `middle_3ss`) and each non-control
-category `c` ∈ {enhanced, silenced, constitutive}, the pipeline:
+| Method | Output | Use when |
+|---|---|---|
+| `bootstrap_contrast` *(default)* | per-position `delta` and `log2fc` with bootstrap CI ribbons | You want signed effect size + uncertainty, not a p-value. Especially good when n_ctrl >> n_cat or you want to compare maps from different libraries. |
+| `cluster_perm` | per-cluster p-values, plot of Welch t with significance bars | You want significance per peak with FWER control across positions and don't want a saturating p-value floor. |
+| `permutation_z` | signed -log10(p) and z-score per position | Legacy: per-position significance via label-permutation z-score. Useful for comparing to historical results. |
+| `fisher` | signed -log10(p) per position | Legacy: per-position Fisher's exact test. Subsetting of control/constitutive is auto-enabled (others auto-disable it). |
 
-1. Pools the `n_c` exons in `c` with the `n_ctrl` control exons.
-2. Computes the observed test statistic per position `p`:
+You can pass multiple methods at once: `--enrichment bootstrap_contrast cluster_perm` produces the union of their outputs.
 
-   `T_obs(p) = mean_coverage_c(p) − mean_coverage_ctrl(p)`
+### `bootstrap_contrast` (default)
 
-   This is a signed effect size (positive ⇒ enriched relative to control)
-   that is well-defined even when the control coverage is zero.
-3. Builds a permutation null by repeating, `B = --n_perm` times:
-   randomly relabel `n_c` of the `n_c + n_ctrl` pooled exons as
-   "category" and recompute `T_perm(p)`. From the resulting
-   `B × n_positions` matrix, take the per-position null mean
-   `μ_perm(p)` and standard deviation `σ_perm(p)`.
-4. Standardises the observation against the null:
+For each non-control category `c` vs. control:
 
-   `z(p) = (T_obs(p) − μ_perm(p)) / σ_perm(p)`
+1. Resample `n_c` exons with replacement from `c` and `n_ctrl` from
+   control, `B = --n_boot` times.
+2. Per iteration `b`, compute `mean_cov_c^b(p)` and `mean_cov_ctrl^b(p)`.
+3. Report two contrasts per position with their `(2.5, 97.5)` percentile
+   bands across `b`:
 
-   and reports the two-sided p-value `p(p) = 2 · Φ(−|z(p)|)`.
-5. Plots **signed −log10(p)**, with the sign taken from `z(p)`
-   (positive ⇒ enriched, negative ⇒ depleted relative to control).
-   The signed −log10(p) curve is Gaussian-smoothed (controlled by
-   `-s, --smoothing`) for visual clarity. Both `zscore` and `pvalue` are
-   written to `{prefix}_RNAmap.tsv`.
+   - `delta(p) = mean_cov_c(p) - mean_cov_ctrl(p)` (additive scale).
+   - `log2fc(p) = log2((mean_cov_c(p) + ε) / (mean_cov_ctrl(p) + ε))`
+     (multiplicative scale, library-size invariant).
 
-### Why z-score against the permutation null
+   Where the CI band excludes 0, the contrast is "significant" in a
+   bootstrap sense, with no p-value involved.
 
-The naive empirical p — `(1 + #|T_perm| ≥ |T_obs|) / (B + 1)` — is
-*bounded* below by `1 / (B + 1)`. With `B = 1000` that caps the
-reportable −log10(p) at ≈ 3, even when the true signal is many orders
-of magnitude stronger. Because the same `−log10(p)` curve is used as an
-**enrichment score for comparing CLIP datasets, peak callers, and
-conditions**, this ceiling makes strong peaks indistinguishable from
-moderately strong ones, and makes the score depend on `B` rather than on
-the data.
+**Class imbalance** (e.g. n_ctrl=10000, n_cat=500) is handled cleanly: the
+bootstrap variance of `mean_cov_ctrl(p)` is negligible, so the CI on the
+contrast reflects the cat-side variance, which is the right behaviour.
+For a 5-10× speed-up at large `n_ctrl`, pass
+`--bootstrap_control_fixed` to skip resampling control entirely (treat
+its mean as a constant). The pipeline auto-suggests this when
+`n_ctrl ≥ 20 × n_cat`.
 
-The z-score against the permutation null fixes this:
+**Pseudocount for log2fc** is adaptive by default:
+`ε = max(1e-3, --pseudocount_frac × median(mean_cov_ctrl over region))`.
+This avoids inflated log2FCs at sparse positions when `n_cat` is small.
+Override with `--pseudocount FLOAT`.
 
-- **Unbounded and continuous.** A position with `z = 25` gives
-  −log10(p) ≈ 137; nothing saturates, and the score reflects effect size
-  monotonically.
-- **Same null model.** The mean and standard deviation come from the
-  *same* label-permutation null as before, so the test still respects the
-  imbalance between `n_c` and `n_ctrl` and does not assume independence
-  between adjacent positions (unlike the per-position Fisher's test).
-  Control / constitutive subsetting therefore remains disabled under
-  `--permute` — all controls are used.
-- **Normal-tail extrapolation is well-justified.** For the statistic
-  `mean(coverage_c) − mean(coverage_ctrl)`, the central limit theorem
-  applies position-wise across exons, so the permutation null is
-  approximately Gaussian for realistic exon counts (dozens or more in
-  each group). Type-I error stays close to nominal in simulation.
-- **Cheap.** Estimating two moments needs far fewer permutations than
-  resolving an extreme tail quantile, so `B = 1000` is plenty. `--n_perm`
-  now controls the *precision* of `μ_perm` and `σ_perm`, not the
-  reportable floor of `p`.
+**Important**: the bootstrap reflects sampling uncertainty in the
+estimator. It does *not* correct for *bias* from contaminated controls
+(silently regulated exons hiding in the control pool). Use
+`--control_set` for that.
 
-Under `--no-permute` the pipeline instead computes a Fisher's exact test
-per position against the control set; in that mode control and
-constitutive exons are subset to match the largest regulated category
-(seeded by `--seed`).
+### `cluster_perm` (Maris-Oostenveld cluster-mass permutation)
 
-### Choosing `--n_perm`
+For each non-control category vs. control:
 
-`--n_perm` (B) controls the precision of the null mean and standard
-deviation used for the z-score. It is **not** a cap on the reportable
-p-value (that ceiling is gone). Reasonable choices:
+1. Per position compute Welch t-statistic
+   `t_obs(p) = (mean_c(p) - mean_ctrl(p)) / sqrt(var_c(p)/n_c + var_ctrl(p)/n_ctrl)`.
+2. Find contiguous runs where `|t_obs(p)| > --cluster_thresh` (default 2.0).
+   Cluster mass is `sum(t_obs)` over the run.
+3. Repeat `B = --n_perm` times: shuffle category/control labels,
+   recompute `t_perm`, find clusters, record `max(|cluster_mass|)`.
+4. Cluster p:
+   `p_cluster = (1 + #(null_max ≥ |obs_mass|)) / (B + 1)`.
 
-| `--n_perm` | Use |
-|---|---|
-| 100 | quick sanity / smoke test (noisy z) |
-| **1000** (default) | normal usage; null moments are well estimated |
-| 10000 | only if you want very stable z at extreme positions |
+This controls family-wise error across positions while respecting the
+position-to-position correlation that pointwise tests ignore. Output
+includes a per-position table (`t_obs`, `in_sig_cluster`,
+`cluster_pvalue`) and a cluster summary (`start_pos, end_pos, mass,
+cluster_pvalue, sign`). Plot shows the `t_obs` curve plus horizontal
+bars beneath the axis at significant clusters (p ≤ 0.05).
 
-The number of regulated exons does *not* dictate `B`. It determines the
-power of the test (whether real signal stands out from noise), which
-raising `B` cannot fix.
+### `permutation_z` (legacy z-score against permutation null)
 
-### Caveats
+The previous default test. For each position the observed
+`T_obs(p) = mean_c(p) - mean_ctrl(p)` is standardised against the
+permutation null mean and standard deviation, and a two-sided p-value
+is reported via a normal-tail approximation. The reported `-log10(p)`
+is unbounded (does not saturate at `1/(B+1)`).
 
-- Smoothing is applied to the signed −log10(p) curve. This is a cosmetic
-  step; the underlying z and p in `{prefix}_RNAmap.tsv` are unsmoothed.
-- The reported p comes from a normal approximation to the permutation
-  null. The approximation is excellent in the body of the distribution
-  and very good in the tail for sums/means of many exons, but at fixed
-  `B` extreme z values still carry Monte-Carlo noise in `μ_perm` and
-  `σ_perm` — raise `--n_perm` if you need very stable scores at
-  individual extreme positions.
-- The test does not control for any covariates (exon length, GC content,
-  expression). If you need covariate matching, pre-filter your control
-  set accordingly.
-- No multiple-testing correction is applied across the hundreds of
-  correlated positions in each region. Treat individual peaks as
-  exploratory; biological replication of the curve shape is the
-  strongest evidence.
+### `fisher` (legacy per-position Fisher's exact test)
+
+For each position, a 2×2 contingency table of {covered, not covered} ×
+{category, control} is tested with Fisher's exact. The signed
+`-log10(p)` is reported, with sign taken from the per-position
+fold-change. With `--enrichment fisher` (or legacy `--no-permute`),
+control and constitutive exons are randomly subset to match the largest
+regulated category (seeded by `--seed`).
+
+---
+
+## Control-set hygiene
+
+Even when categories were assigned by FDR, the "control" pool can
+silently include genuinely regulated exons that fall below the detection
+threshold. This biases every cat-vs-ctrl statistic toward null, regardless
+of the test you use, and **bootstrapping does not fix this** — it's a
+bias, not a variance. The `--control_set` flag offers two stricter
+modes:
+
+- `--control_set strict` keeps only control exons with
+  `|dPSI| < --control_max_dpsi` (default 0.01) AND
+  `FDR > --control_min_fdr` (default 0.5). Removes likely contaminated
+  controls at the cost of a smaller (but cleaner) negative set.
+- `--control_set constitutive_only` drops the original control pool and
+  uses constitutive exons (high maxPSI, |dPSI| ≈ 0) as the negative set.
+  By definition uninvolved in regulation, but typically fewer.
+
+In VastDB mode, `strict` is partially applicable (no FDR column) and
+will fall back to the dPSI cutoff with a warning. `constitutive_only`
+works in both modes.
+
+---
+
+## Caveats
+
+- The bootstrap and permutation tests do not control for covariates
+  (exon length, GC content, expression). If you need covariate
+  matching, pre-filter the relevant exons before running.
+- For `bootstrap_contrast`, the central line and CI band reflect
+  sampling uncertainty in the estimator, not contamination of the
+  control pool. Use `--control_set` for the latter.
+- For `cluster_perm`, the cluster p-value is bounded below by
+  `1/(B+1)`, so very strong peaks all show `p ≈ 1/B`. Per-cluster
+  effect size is still readable from the `mass` column.
+- For `permutation_z`, the reported p comes from a normal
+  approximation to the permutation null. The approximation is
+  excellent in the body and very good in the tail for sums/means of
+  dozens of exons, but extreme z values still carry Monte-Carlo noise
+  in `μ_perm` and `σ_perm` — raise `--n_perm` if you need very stable
+  scores at individual extreme positions.
+- No multiple-testing correction is applied across positions outside of
+  cluster_perm. Treat individual peaks as exploratory; biological
+  replication of the curve shape is the strongest evidence.

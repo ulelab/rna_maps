@@ -36,7 +36,16 @@ def cli():
     optional = parser.add_argument_group('Optional arguments')
     optional.add_argument(
         '--y_axis', type=str, default='log10p', choices=['log10p', 'zscore'],
-        help="Y-axis for RNA map plots: 'log10p' (default) for signed -log10(p), 'zscore' for signed permutation z-score.")
+        help="Y-axis for legacy permutation_z RNA map plots: 'log10p' "
+             "(default) for signed -log10(p), 'zscore' for signed "
+             "permutation z-score. Ignored for other --enrichment methods.")
+    optional.add_argument(
+        '--enrichment', type=str, nargs='+', default=None,
+        choices=['permutation_z', 'fisher', 'bootstrap_contrast',
+                 'cluster_perm'],
+        help="One or more enrichment methods to run. "
+             "[DEFAULT: bootstrap_contrast]. Honours legacy --no-permute "
+             "as 'fisher' when --enrichment is not given.")
 
     # VASTDB-SPECIFIC ARGUMENTS
     vastdb_group = parser.add_argument_group('VastDB mode options')
@@ -102,6 +111,25 @@ def cli():
         help='Two-column TSV mapping Ensembl chrom names to GENCODE chrom '
              'names (used with --hg38_chr_autodetect)')
 
+    # CONTROL-SET HYGIENE OPTIONS
+    ctrl_group = parser.add_argument_group('Control-set hygiene options')
+    ctrl_group.add_argument(
+        '--control_set', type=str, default='default',
+        choices=['default', 'strict', 'constitutive_only'],
+        help="Control-set mode. 'default' uses the current control "
+             "criteria. 'strict' tightens to |dPSI|<--control_max_dpsi "
+             "AND FDR>--control_min_fdr. 'constitutive_only' drops the "
+             "control category and relabels constitutive -> control."
+    )
+    ctrl_group.add_argument(
+        '--control_max_dpsi', type=float, default=0.01,
+        help="Strict mode: max |dPSI| for control exons [DEFAULT: 0.01]"
+    )
+    ctrl_group.add_argument(
+        '--control_min_fdr', type=float, default=0.5,
+        help="Strict mode: min FDR for control exons [DEFAULT: 0.5]"
+    )
+
     # PERMUTATION TEST OPTIONS
     perm_group = parser.add_argument_group('Permutation test options')
     perm_group.add_argument(
@@ -113,7 +141,35 @@ def cli():
              "test (legacy behaviour)")
     perm_group.add_argument(
         '--n_perm', type=int, default=1000,
-        help='Number of label permutations [DEFAULT: 1000]')
+        help='Number of label permutations [DEFAULT: 1000] (used by '
+             'permutation_z and cluster_perm)')
+
+    # BOOTSTRAP CONTRAST OPTIONS
+    boot_group = parser.add_argument_group(
+        'Bootstrap contrast options (--enrichment bootstrap_contrast)')
+    boot_group.add_argument(
+        '--n_boot', type=int, default=1000,
+        help='Bootstrap iterations [DEFAULT: 1000]')
+    boot_group.add_argument(
+        '--bootstrap_control_fixed', action='store_true',
+        help='Treat control mean as a constant (skip resampling control). '
+             'Equivalent up to negligible variance when n_ctrl >> n_cat '
+             'and 5-10x faster.')
+    boot_group.add_argument(
+        '--pseudocount', type=float, default=None,
+        help='Override adaptive log2FC pseudocount with a fixed value. '
+             'When unset, eps = max(1e-3, --pseudocount_frac * '
+             'median(mean_cov_ctrl over region)).')
+    boot_group.add_argument(
+        '--pseudocount_frac', type=float, default=0.01,
+        help='Adaptive log2FC pseudocount fraction [DEFAULT: 0.01]')
+
+    # CLUSTER-PERMUTATION OPTIONS
+    cl_group = parser.add_argument_group(
+        'Cluster-permutation options (--enrichment cluster_perm)')
+    cl_group.add_argument(
+        '--cluster_thresh', type=float, default=2.0,
+        help='Cluster-defining |t| threshold [DEFAULT: 2.0]')
 
     # rMATS-SPECIFIC THRESHOLDS
     rmats_group = parser.add_argument_group('rMATS mode thresholds')
@@ -146,6 +202,15 @@ def cli():
         help='Directory containing germs.R [DEFAULT: current directory]')
 
     args = parser.parse_args()
+
+    # Resolve --enrichment with backward-compat for legacy --permute /
+    # --no-permute. Explicit --enrichment wins. Otherwise, --no-permute
+    # maps to 'fisher'; default is 'bootstrap_contrast'.
+    if args.enrichment is None:
+        if not args.permute:
+            args.enrichment = ['fisher']
+        else:
+            args.enrichment = ['bootstrap_contrast']
 
     # Validate VastDB mode requirements
     if args.vastdb_mode:

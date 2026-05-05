@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 
 from rnamaps.coverage import get_coverage_plot
+from rnamaps.enrichment import EnrichmentResult
+from rnamaps.enrichment import bootstrap_contrast as enrich_bootstrap
+from rnamaps.enrichment import cluster_perm as enrich_cluster
 from rnamaps.io_rmats import load_rmats_data
 from rnamaps.io_vastdb import load_vastdb_data
 from rnamaps.logging_utils import log_runtime, setup_logging
@@ -15,11 +18,117 @@ from rnamaps.multivalency import plot_multivalency
 from rnamaps.permutation import compute_permutation_pvalues
 from rnamaps.plots import plot_exon_lengths, plot_heatmap, plot_rna_map
 from rnamaps.preprocessing import (
+    apply_control_set,
     apply_subsetting,
     autodetect_and_convert_bed_chroms,
     autodetect_and_convert_df_chroms,
     get_ss_bed,
 )
+
+
+def _run_method(method, region_per_exon_df, region_fisher_linegraph,
+                exon_categories, region_label, args, rng, smoothing):
+    """Dispatch a single enrichment method on one splice-site region.
+
+    Returns
+    -------
+    EnrichmentResult or None
+    """
+    if method == 'bootstrap_contrast':
+        return enrich_bootstrap.compute(
+            region_per_exon_df, exon_categories, region_label,
+            rng=rng,
+            n_boot=args.n_boot,
+            pseudocount=args.pseudocount,
+            pseudocount_frac=args.pseudocount_frac,
+            bootstrap_control_fixed=args.bootstrap_control_fixed,
+        )
+    if method == 'cluster_perm':
+        return enrich_cluster.compute(
+            region_per_exon_df, exon_categories, region_label,
+            rng=rng,
+            n_perm=args.n_perm,
+            cluster_thresh=args.cluster_thresh,
+        )
+    if method == 'permutation_z':
+        plot_df, clusters_df = compute_permutation_pvalues(
+            region_per_exon_df, exon_categories, region_label,
+            n_perm=args.n_perm, smoothing=smoothing, rng=rng,
+        )
+        y_col = ('zscore' if getattr(args, 'y_axis', 'log10p') == 'zscore'
+                 else '-log10pvalue_smoothed')
+        ylabel = ('signed permutation z-score vs control'
+                  if y_col == 'zscore'
+                  else 'signed -log10(empirical p) vs control')
+        return EnrichmentResult(
+            plot_df=plot_df, clusters_df=clusters_df,
+            plot_kind='line', y_columns=(y_col,),
+            method_name='permutation_z', ylabel=ylabel,
+        )
+    if method == 'fisher':
+        df = region_fisher_linegraph
+        if df is None or df.empty:
+            return None
+        return EnrichmentResult(
+            plot_df=df, clusters_df=pd.DataFrame(),
+            plot_kind='line', y_columns=('-log10pvalue_smoothed',),
+            method_name='fisher',
+            ylabel='-log10(p value) enrichment / control',
+        )
+    raise ValueError(f"Unknown enrichment method: {method!r}")
+
+
+def _plot_method(method, plot_df, clusters_df, exon_categories,
+                 original_counts, window, args, output_dir, FILEname):
+    """Render one PDF (or two for bootstrap_contrast) for a method's
+    accumulated per-region results."""
+    if method == 'bootstrap_contrast':
+        subtitle = (f"Bootstrap contrast (B={args.n_boot})"
+                    + (' [ctrl fixed]'
+                       if args.bootstrap_control_fixed else ''))
+        for y_col, ylab in [
+            ('delta', 'mean coverage difference (cat - ctrl)'),
+            ('log2fc', 'log2 fold change vs control'),
+        ]:
+            plot_rna_map(
+                plot_df, exon_categories, original_counts,
+                window, args.all_sites, output_dir, FILEname,
+                plot_kind='ribbon', y_col=y_col,
+                ci_cols=(f'{y_col}_lo', f'{y_col}_hi'),
+                method_name=y_col, ylabel=ylab, subtitle=subtitle,
+            )
+        return
+    if method == 'cluster_perm':
+        subtitle = (f"Cluster-mass permutation (B={args.n_perm}, "
+                    f"|t|>{args.cluster_thresh}); bars at p<=0.05")
+        plot_rna_map(
+            plot_df, exon_categories, original_counts,
+            window, args.all_sites, output_dir, FILEname,
+            plot_kind='clusters', y_col='t_obs',
+            clusters_df=clusters_df,
+            method_name='cluster_perm',
+            ylabel='Welch t (cluster permutation)',
+            subtitle=subtitle,
+        )
+        return
+    if method == 'permutation_z':
+        plot_rna_map(
+            plot_df, exon_categories, original_counts,
+            window, args.all_sites, output_dir, FILEname,
+            pvalue_method='permutation', n_perm=args.n_perm,
+            y_axis=getattr(args, 'y_axis', 'log10p'),
+            plot_kind='line', method_name='permutation_z',
+        )
+        return
+    if method == 'fisher':
+        plot_rna_map(
+            plot_df, exon_categories, original_counts,
+            window, args.all_sites, output_dir, FILEname,
+            pvalue_method='fisher', plot_kind='line',
+            method_name='fisher',
+        )
+        return
+    raise ValueError(f"Unknown enrichment method: {method!r}")
 
 
 def run_rna_map(args):
@@ -107,6 +216,14 @@ def run_rna_map(args):
         logging.info(f"Removed {before - after} exons with missing flanking coordinates")
         logging.info(f"Remaining: {after} exons")
 
+        # Apply control-set hygiene mode (no-op for 'default').
+        df_rmats = apply_control_set(
+            df_rmats,
+            mode=getattr(args, 'control_set', 'default'),
+            control_max_dpsi=getattr(args, 'control_max_dpsi', 0.01),
+            control_min_fdr=getattr(args, 'control_min_fdr', 0.5),
+        )
+
         exon_categories = df_rmats.groupby('category').size()
         logging.info("\nExons in each category:")
         logging.info(exon_categories)
@@ -121,19 +238,24 @@ def run_rna_map(args):
             logging.error("No regulated exons found!")
             sys.exit(1)
 
-        # Apply subsetting. With --permute the test handles unequal n
-        # correctly, so subsetting is skipped automatically (the legend
-        # would otherwise show stale "subset from N" annotations).
-        permute_active = getattr(args, 'permute', True)
-        if not args.no_subset and not permute_active:
+        # Apply subsetting. Only the legacy 'fisher' method benefits
+        # from subsetting; bootstrap_contrast / cluster_perm /
+        # permutation_z all handle unequal n correctly. Auto-disable
+        # subsetting whenever any non-fisher method is selected so the
+        # legend doesn't show stale "subset from N" annotations.
+        enrichment_methods = list(getattr(args, 'enrichment',
+                                          ['bootstrap_contrast']))
+        needs_full = any(m != 'fisher' for m in enrichment_methods)
+        if not args.no_subset and not needs_full:
             df_rmats, original_counts = apply_subsetting(
                 df_rmats, args.no_constitutive
             )
         else:
-            if permute_active and not args.no_subset:
+            if needs_full and not args.no_subset:
                 logging.info(
-                    "Subsetting auto-disabled because --permute is on "
-                    "(use --no-permute to restore subsetting)."
+                    "Subsetting auto-disabled because --enrichment "
+                    "includes a non-fisher method "
+                    f"({', '.join(enrichment_methods)})."
                 )
             else:
                 logging.info("Subsetting disabled (--no_subset flag)")
@@ -275,48 +397,83 @@ def run_rna_map(args):
                     per_exon_upstream_3ss, per_exon_upstream_5ss,
                 ]
 
-            # Heatmap (unaffected by permutation: uses full per-exon data
-            # from the original coverage call).
+            # Heatmap (unaffected by enrichment method choice: uses
+            # full per-exon data from the original coverage call).
             plot_heatmap(heat_df, exon_categories, window, args.all_sites,
                          output_dir, FILEname)
 
-            # Optionally replace Fisher-based plotting_df with permutation
-            # results. Heatmap is already generated above and is untouched.
-            if getattr(args, 'permute', True):
-                logging.info("\n" + "=" * 60)
-                logging.info(
-                    f"RUNNING LABEL-PERMUTATION TEST (B={args.n_perm})"
-                )
-                logging.info("=" * 60)
-                perm_plot_frames = []
-                for region_df in per_exon_regions:
-                    if region_df.empty:
-                        continue
-                    region_label = region_df['label'].iloc[0]
-                    plot_part, _ = compute_permutation_pvalues(
-                        region_df, exon_categories, region_label,
-                        n_perm=args.n_perm, smoothing=smoothing, rng=rng,
-                    )
-                    perm_plot_frames.append(plot_part)
-                if perm_plot_frames:
-                    plotting_df = pd.concat(perm_plot_frames, ignore_index=True)
+            # Pair each region's per-exon coverage with its fisher
+            # linegraph (used as-is for --enrichment fisher).
+            if not args.all_sites:
+                fisher_linegraphs = [
+                    linegraph_upstream_5ss, linegraph_middle_3ss,
+                    linegraph_middle_5ss, linegraph_downstream_3ss,
+                ]
+            else:
+                fisher_linegraphs = [
+                    linegraph_middle_3ss, linegraph_middle_5ss,
+                    linegraph_downstream_3ss, linegraph_downstream_5ss,
+                    linegraph_upstream_3ss, linegraph_upstream_5ss,
+                ]
 
-            # Save coverage / p-value table
-            plotting_df.to_csv(
-                f'{output_dir}/{FILEname}_RNAmap.tsv', sep="\t", index=False
+            logging.info("\n" + "=" * 60)
+            logging.info(
+                f"RUNNING ENRICHMENT METHOD(S): "
+                f"{', '.join(enrichment_methods)}"
             )
+            logging.info("=" * 60)
 
-            # Main RNA map plot
+            # method -> list of EnrichmentResult per region (in order)
+            results_by_method = {m: [] for m in enrichment_methods}
+
+            for region_df, fisher_lg in zip(
+                per_exon_regions, fisher_linegraphs
+            ):
+                if region_df.empty:
+                    continue
+                region_label = region_df['label'].iloc[0]
+                for method in enrichment_methods:
+                    res = _run_method(
+                        method, region_df, fisher_lg,
+                        exon_categories, region_label, args, rng,
+                        smoothing,
+                    )
+                    if res is not None:
+                        results_by_method[method].append(res)
+
             logging.info("\n" + "=" * 60)
             logging.info("PLOTTING RNA MAPS")
             logging.info("=" * 60)
 
-            plot_rna_map(plotting_df, exon_categories, original_counts,
-                         window, args.all_sites, output_dir, FILEname,
-                         pvalue_method=('permutation'
-                                        if getattr(args, 'permute', True)
-                                        else 'fisher'),
-                         n_perm=args.n_perm)
+            for method in enrichment_methods:
+                method_results = results_by_method[method]
+                if not method_results:
+                    logging.warning(f"[{method}] No results to plot.")
+                    continue
+
+                method_plot_df = pd.concat(
+                    [r.plot_df for r in method_results], ignore_index=True
+                )
+                cluster_frames = [r.clusters_df for r in method_results
+                                  if r.clusters_df is not None
+                                  and not r.clusters_df.empty]
+                method_clusters_df = (pd.concat(cluster_frames,
+                                                ignore_index=True)
+                                      if cluster_frames else pd.DataFrame())
+
+                method_plot_df.to_csv(
+                    f'{output_dir}/{FILEname}_RNAmap_{method}.tsv',
+                    sep="\t", index=False,
+                )
+                if not method_clusters_df.empty:
+                    method_clusters_df.to_csv(
+                        f'{output_dir}/{FILEname}_RNAmap_{method}_clusters.tsv',
+                        sep="\t", index=False,
+                    )
+
+                _plot_method(method, method_plot_df, method_clusters_df,
+                             exon_categories, original_counts,
+                             window, args, output_dir, FILEname)
 
         # ==============================================================
         # MULTIVALENCY (optional, requires germs.R)

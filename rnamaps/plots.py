@@ -255,70 +255,34 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
     logging.info(f"Saved heatmap to {output_dir}/{FILEname}_heatmap.pdf")
 
 
-def plot_rna_map(plotting_df, exon_categories, original_counts,
-
-                 window, all_sites, output_dir, FILEname,
-                 pvalue_method='fisher', n_perm=None, y_axis='log10p'):
-    """Generate the main RNA map line plots.
-
-    y_axis: 'log10p' (default) for signed -log10(pvalue), 'zscore' for signed permutation z-score.
-    """
-    sns.set(rc={'figure.figsize': (7, 5)})
-    sns.set_style("whitegrid")
-
+def _layout(all_sites):
     if not all_sites:
-        col_order = ["upstream_5ss", "middle_3ss", "middle_5ss", "downstream_3ss"]
-        titles = ["Upstream 5'SS", "Middle 3'SS", "Middle 5'SS", "Downstream 3'SS"]
+        col_order = ["upstream_5ss", "middle_3ss",
+                     "middle_5ss", "downstream_3ss"]
+        titles = ["Upstream 5'SS", "Middle 3'SS",
+                  "Middle 5'SS", "Downstream 3'SS"]
         col_wrap = 4
     else:
-        col_order = ["upstream_3ss", "upstream_5ss", "middle_3ss", "middle_5ss",
+        col_order = ["upstream_3ss", "upstream_5ss",
+                     "middle_3ss", "middle_5ss",
                      "downstream_3ss", "downstream_5ss"]
-        titles = ["Upstream 3'SS", "Upstream 5'SS", "Middle 3'SS", "Middle 5'SS",
+        titles = ["Upstream 3'SS", "Upstream 5'SS",
+                  "Middle 3'SS", "Middle 5'SS",
                   "Downstream 3'SS", "Downstream 5'SS"]
         col_wrap = 6
+    return col_order, titles, col_wrap
 
-    if y_axis == 'zscore':
-        y_col = 'zscore'
-    else:
-        y_col = '-log10pvalue_smoothed'
 
-    g = sns.relplot(
-        data=plotting_df, x='position', y=y_col,
-        hue='name', col='label', facet_kws={"sharex": False},
-        kind='line', col_wrap=col_wrap, height=5, aspect=4 / 5,
-        col_order=col_order,
-        hue_order=[c for c in
-                   ['constitutive', 'control', 'enhanced', 'silenced',
-                    'enhanced_rest', 'silenced_rest']
-                   if c in plotting_df['name'].unique()],
-    )
+_DEFAULT_HUE_ORDER = [
+    'constitutive', 'control', 'enhanced', 'silenced',
+    'enhanced_rest', 'silenced_rest',
+]
 
-    for ax, title in zip(g.axes.flat, titles):
-        ax.set_title(title)
-        ax.axhline(y=0, color='k', alpha=0.2, linewidth=0.5)
-        fig = plt.gcf()
-        marker_ax = add_enrichment_marker(fig, ax)
 
-    g.set(xlabel='')
-    if y_axis == 'zscore':
-        ylabel = 'signed permutation z-score vs control'
-    elif pvalue_method == 'permutation':
-        ylabel = 'signed -log10(empirical p) vs control'
-    else:
-        ylabel = '-log10(p value) enrichment / control'
-    g.axes[0].set_ylabel(ylabel)
-
-    sns.move_legend(
-        g, "upper right",
-        bbox_to_anchor=(1, 2),
-        ncol=1, title=None, frameon=False
-    )
-    leg = g._legend
-    set_legend_text(leg, exon_categories, original_counts)
-
-    # Exon-intron drawings
+def _decorate_exon_intron(g, col_order, window):
+    """Draw exon/intron rectangles, set xlims and tick labels per panel."""
     rect_fraction = 1 / ((window + 50) / 50)
-
+    last_rect = None
     for i, ss_type in enumerate(col_order):
         ax = g.axes[i]
         is_middle = ss_type.startswith('middle_')
@@ -360,17 +324,176 @@ def plot_rna_map(plotting_df, exon_categories, original_counts,
                 color="slategrey", alpha=1,
                 transform=ax.transAxes, clip_on=False)
             ax.add_artist(rect)
+        last_rect = rect
+    return last_rect
+
+
+def _hue_palette(plotting_df):
+    hue_order = [c for c in _DEFAULT_HUE_ORDER
+                 if c in plotting_df['name'].unique()]
+    palette_map = {
+        'constitutive': colors_dict['const'],
+        'control': colors_dict['ctrl'],
+        'enhanced': colors_dict['enh'],
+        'silenced': colors_dict['sil'],
+        'enhanced_rest': colors_dict['enhrest'],
+        'silenced_rest': colors_dict['silrest'],
+    }
+    palette = {h: palette_map.get(h, '#999999') for h in hue_order}
+    return hue_order, palette
+
+
+def plot_rna_map(plotting_df, exon_categories, original_counts,
+                 window, all_sites, output_dir, FILEname,
+                 pvalue_method='fisher', n_perm=None, y_axis='log10p',
+                 plot_kind='line', y_col=None, ci_cols=None,
+                 clusters_df=None, method_name=None, ylabel=None,
+                 subtitle=None):
+    """Generate RNA map plots.
+
+    Parameters
+    ----------
+    plot_kind : {'line', 'ribbon', 'clusters'}
+        - ``'line'``: single y-column line plot (default; legacy behaviour).
+        - ``'ribbon'``: line plot with a shaded CI band from
+          ``ci_cols=(lo_col, hi_col)``.
+        - ``'clusters'``: line plot for ``y_col`` plus horizontal markers
+          beneath the x-axis at significant clusters from ``clusters_df``.
+    y_col : str, optional
+        Column to plot on the y-axis. For ``plot_kind='line'`` it
+        defaults from ``y_axis`` (legacy behaviour).
+    ci_cols : tuple of (str, str), optional
+        Lower / upper CI column names for ``plot_kind='ribbon'``.
+    clusters_df : DataFrame, optional
+        Cluster summary table for ``plot_kind='clusters'``.
+    method_name : str, optional
+        Output PDF suffix; e.g. ``'log2fc'`` ⇒ ``..._RNAmap_log2fc.pdf``.
+        Defaults to ``'-log10pvalue'`` (legacy filename).
+    ylabel : str, optional
+        Y-axis label override.
+    subtitle : str, optional
+        Small grey subtitle drawn above the figure.
+    """
+    sns.set(rc={'figure.figsize': (7, 5)})
+    sns.set_style("whitegrid")
+
+    col_order, titles, col_wrap = _layout(all_sites)
+
+    if y_col is None:
+        y_col = 'zscore' if y_axis == 'zscore' else '-log10pvalue_smoothed'
+    if method_name is None:
+        method_name = '-log10pvalue'
+
+    hue_order, palette = _hue_palette(plotting_df)
+
+    if plot_kind == 'line':
+        g = sns.relplot(
+            data=plotting_df, x='position', y=y_col,
+            hue='name', col='label', facet_kws={"sharex": False},
+            kind='line', col_wrap=col_wrap, height=5, aspect=4 / 5,
+            col_order=col_order, hue_order=hue_order, palette=palette,
+        )
+    elif plot_kind in ('ribbon', 'clusters'):
+        g = sns.FacetGrid(
+            plotting_df, col='label', col_order=col_order,
+            col_wrap=col_wrap, height=5, aspect=4 / 5,
+            hue='name', hue_order=hue_order, palette=palette,
+            sharex=False, sharey=True,
+        )
+        if plot_kind == 'ribbon':
+            if ci_cols is None:
+                ci_cols = (f"{y_col}_lo", f"{y_col}_hi")
+            lo_col, hi_col = ci_cols
+
+            def _ribbon(data, color=None, **kwargs):
+                d = data.sort_values('position')
+                plt.fill_between(
+                    d['position'].values,
+                    d[lo_col].values, d[hi_col].values,
+                    color=color, alpha=0.2, linewidth=0,
+                )
+                plt.plot(d['position'].values, d[y_col].values,
+                         color=color, linewidth=2)
+
+            g.map_dataframe(_ribbon)
+        else:
+            def _line(data, color=None, **kwargs):
+                d = data.sort_values('position')
+                plt.plot(d['position'].values, d[y_col].values,
+                         color=color, linewidth=2)
+            g.map_dataframe(_line)
+        g.add_legend()
+    else:
+        raise ValueError(
+            f"Unknown plot_kind={plot_kind!r}; expected one of "
+            f"'line', 'ribbon', 'clusters'."
+        )
+
+    for ax, title in zip(g.axes.flat, titles):
+        ax.set_title(title)
+        ax.axhline(y=0, color='k', alpha=0.2, linewidth=0.5)
+        fig = plt.gcf()
+        marker_ax = add_enrichment_marker(fig, ax)
+
+    g.set(xlabel='')
+
+    if ylabel is None:
+        if y_axis == 'zscore':
+            ylabel = 'signed permutation z-score vs control'
+        elif pvalue_method == 'permutation':
+            ylabel = 'signed -log10(empirical p) vs control'
+        else:
+            ylabel = '-log10(p value) enrichment / control'
+    g.axes[0].set_ylabel(ylabel)
+
+    sns.move_legend(
+        g, "upper right",
+        bbox_to_anchor=(1, 2),
+        ncol=1, title=None, frameon=False,
+    )
+    leg = g._legend
+    set_legend_text(leg, exon_categories, original_counts)
+
+    last_rect = _decorate_exon_intron(g, col_order, window)
+
+    # Cluster bars under each panel.
+    if plot_kind == 'clusters' and clusters_df is not None and not clusters_df.empty:
+        for i, ss_type in enumerate(col_order):
+            ax = g.axes[i]
+            sub = clusters_df[
+                (clusters_df['label'] == ss_type)
+                & (clusters_df['cluster_pvalue'] <= 0.05)
+            ]
+            if sub.empty:
+                continue
+            ymin, ymax = ax.get_ylim()
+            yrange = ymax - ymin
+            for j, (_, row) in enumerate(sub.iterrows()):
+                cat = row['name']
+                color = palette.get(cat, '#999999')
+                yoff = ymin - 0.04 * yrange - 0.02 * yrange * j
+                ax.plot(
+                    [row['start_pos'], row['end_pos']],
+                    [yoff, yoff],
+                    color=color, linewidth=4, solid_capstyle='butt',
+                    clip_on=False,
+                )
 
     plt.subplots_adjust(wspace=0.05)
-    if pvalue_method == 'permutation' and n_perm is not None:
-        g.fig.suptitle(
-            f"Label-permutation test (B={n_perm}).",
-            y=1.02, fontsize=8, color='dimgray',
-        )
+
+    auto_subtitle = None
+    if subtitle is None and pvalue_method == 'permutation' and n_perm is not None:
+        auto_subtitle = f"Label-permutation test (B={n_perm})."
+    final_subtitle = subtitle if subtitle is not None else auto_subtitle
+    if final_subtitle:
+        g.fig.suptitle(final_subtitle, y=1.02, fontsize=8, color='dimgray')
+
+    out_path = f'{output_dir}/{FILEname}_RNAmap_{method_name}.pdf'
     plt.savefig(
-        f'{output_dir}/{FILEname}_RNAmap_-log10pvalue.pdf',
-        bbox_extra_artists=([leg, rect, marker_ax]),
-        bbox_inches='tight', pad_inches=0.8
+        out_path,
+        bbox_extra_artists=([leg, last_rect, marker_ax]),
+        bbox_inches='tight', pad_inches=0.8,
     )
-    logging.info(f"Saved RNA map to {output_dir}/{FILEname}_RNAmap_-log10pvalue.pdf")
+    logging.info(f"Saved RNA map to {out_path}")
+    plt.close('all')
     pbt.helpers.cleanup()

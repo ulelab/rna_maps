@@ -1,6 +1,6 @@
 #!/bin/bash
 
-python3 ../rna_maps.py \
+rnamaps \
 -i ../Karen_12hr_PPIG_SE.MATS.JCEC.txt \
 -f ../../../data/ref/GRCh38.primary_assembly.genome.fa \
 -fi ../../../data/ref/GRCh38.primary_assembly.genome.fa.fai \
