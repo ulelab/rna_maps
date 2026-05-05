@@ -177,6 +177,61 @@ def test_match_handles_empty_negative_bin():
     assert (out["category"] == "control").sum() == 0
 
 
+def test_match_keeps_regulated_with_missing_or_low_tpm():
+    df = pd.DataFrame(
+        {
+            "category": (
+                ["enhanced"] * 5
+                + ["silenced"] * 5
+                + ["enhanced", "silenced"]  # missing TPM regulated
+                + ["enhanced", "silenced"]  # below min_tpm regulated
+                + ["control"] * 30
+                + ["control"] * 5  # below min_tpm controls -> dropped
+                + ["constitutive"] * 30
+                + ["constitutive"] * 5  # below min_tpm constitutives -> dropped
+            ),
+            "tpm": (
+                [2.0] * 5
+                + [50.0] * 5
+                + [np.nan, np.nan]
+                + [0.05, 0.05]
+                + [2.0] * 10
+                + [50.0] * 10
+                + [10.0] * 10
+                + [0.05] * 5
+                + [2.0] * 10
+                + [50.0] * 10
+                + [10.0] * 10
+                + [0.05] * 5
+            ),
+        }
+    )
+    df["gene_id"] = [f"g{i}" for i in range(len(df))]
+    out, summary = match_controls_by_expression(
+        df,
+        n_bins=2,
+        pseudocount=1.0,
+        min_tpm=1.0,
+        also_constitutive=True,
+        rng=np.random.default_rng(0),
+    )
+
+    enhanced_in = int((df["category"] == "enhanced").sum())
+    silenced_in = int((df["category"] == "silenced").sum())
+    enhanced_out = int((out["category"] == "enhanced").sum())
+    silenced_out = int((out["category"] == "silenced").sum())
+
+    assert enhanced_out == enhanced_in
+    assert silenced_out == silenced_in
+    assert summary["regulated_exempt_from_matching"] == {
+        "enhanced": 2,
+        "silenced": 2,
+    }
+    # Negatives below min_tpm must be dropped.
+    assert summary["dropped_missing_or_low_tpm"]["control"] == 5
+    assert summary["dropped_missing_or_low_tpm"]["constitutive"] == 5
+
+
 def test_match_seeded_reproducible():
     df = _make_expression_df()
     out1, _ = match_controls_by_expression(

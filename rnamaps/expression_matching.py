@@ -142,6 +142,52 @@ def attach_tpm_to_exons(
     if any(v > 0 for v in missing_by_cat.values()):
         logging.warning("Rows with missing TPM after ID matching by category: %s", missing_by_cat)
 
+    # Detailed diagnostic: which regulated exons failed to match a TPM?
+    # Surface raw (un-normalised) gene IDs/symbols so users can spot
+    # synonym mismatches, version-suffix issues, etc.
+    raw_ens_series = _series_from_first_present(df_exons, ["GeneID", "gene_id"])
+    raw_sym_series = _series_from_first_present(df_exons, ["GENE", "geneSymbol", "gene_name"])
+    reg_missing_mask = (
+        df["tpm"].isna() & df["category"].isin(REGULATED_CATEGORIES)
+    )
+    if reg_missing_mask.any():
+        diag = pd.DataFrame(
+            {
+                "category": df.loc[reg_missing_mask, "category"].astype(str).values,
+                "raw_gene_id": raw_ens_series.reindex(df.index)
+                .loc[reg_missing_mask]
+                .astype(str)
+                .values,
+                "raw_symbol": raw_sym_series.reindex(df.index)
+                .loc[reg_missing_mask]
+                .astype(str)
+                .values,
+                "normalised_key": df.loc[reg_missing_mask, "gene_id"].astype(str).values,
+            }
+        )
+        max_examples = 50
+        for cat, group in diag.groupby("category"):
+            uniq = group.drop_duplicates(subset=["raw_gene_id", "raw_symbol"])
+            logging.info(
+                "Regulated exons with no TPM match in category %s "
+                "(%d rows, %d unique genes; showing up to %d). "
+                "Format: raw_gene_id | raw_symbol | normalised_%s_key",
+                cat,
+                len(group),
+                len(uniq),
+                max_examples,
+                chosen,
+            )
+            for _, row in uniq.head(max_examples).iterrows():
+                logging.info(
+                    "  %s | %s | %s",
+                    row["raw_gene_id"],
+                    row["raw_symbol"],
+                    row["normalised_key"],
+                )
+            if len(uniq) > max_examples:
+                logging.info("  ... (%d more unique genes)", len(uniq) - max_examples)
+
     info: Dict[str, float | str | int] = {
         "id_type": chosen,
         "ensembl_rate": float(ens_rate),
@@ -220,24 +266,57 @@ def match_controls_by_expression(
     df_all = df_exons.copy()
     before_counts = df_all["category"].value_counts().to_dict()
 
+    negative_targets = ["control"]
+    if also_constitutive:
+        negative_targets.append("constitutive")
+
     exempt_frames = []
     if not also_constitutive:
+        # Constitutive bypasses matching entirely when opted out.
         exempt_const = df_all[df_all["category"] == "constitutive"].copy()
         if not exempt_const.empty:
             exempt_frames.append(exempt_const)
         df = df_all[df_all["category"] != "constitutive"].copy()
     else:
-        df = df_all
+        df = df_all.copy()
 
-    valid_tpm_mask = df["tpm"].notna() & (df["tpm"] >= min_tpm)
-    dropped = df.loc[~valid_tpm_mask, "category"].value_counts().to_dict()
+    invalid_tpm = df["tpm"].isna() | (df["tpm"] < min_tpm)
+
+    # Regulated exons are NEVER dropped on TPM grounds. If they have
+    # missing/low TPM they bypass binning/matching and pass through
+    # unchanged into the output.
+    reg_exempt_mask = invalid_tpm & df["category"].isin(REGULATED_CATEGORIES)
+    reg_exempt_counts: Dict[str, int] = {}
+    if reg_exempt_mask.any():
+        reg_exempt = df.loc[reg_exempt_mask].copy()
+        reg_exempt_counts = {
+            str(k): int(v)
+            for k, v in reg_exempt["category"].value_counts().to_dict().items()
+        }
+        logging.info(
+            "Keeping regulated exons with missing/low TPM (min_tpm=%s) without "
+            "expression matching by category: %s",
+            min_tpm,
+            reg_exempt_counts,
+        )
+        exempt_frames.append(reg_exempt)
+        df = df.loc[~reg_exempt_mask].copy()
+        invalid_tpm = invalid_tpm.loc[df.index]
+
+    # Drop missing/low TPM only from negative (control/constitutive) sets.
+    drop_mask = invalid_tpm & df["category"].isin(negative_targets)
+    dropped = {
+        str(k): int(v)
+        for k, v in df.loc[drop_mask, "category"].value_counts().to_dict().items()
+    }
     if dropped:
         logging.info(
-            "Dropping rows with missing/low TPM (min_tpm=%s) by category: %s",
+            "Dropping rows with missing/low TPM (min_tpm=%s) from negative "
+            "categories only: %s",
             min_tpm,
             dropped,
         )
-    df = df.loc[valid_tpm_mask].copy()
+    df = df.loc[~drop_mask].copy()
 
     if df.empty:
         raise ValueError("No rows remain after TPM filtering.")
@@ -268,10 +347,6 @@ def match_controls_by_expression(
     reg_total = int(reg_counts.sum())
     reg_fracs = reg_counts / reg_total
 
-    negative_targets = ["control"]
-    if also_constitutive:
-        negative_targets.append("constitutive")
-
     keep_frames = [df[~df["category"].isin(negative_targets)].copy()]
     neg_summary = {}
     for cat in negative_targets:
@@ -296,7 +371,8 @@ def match_controls_by_expression(
     summary: Dict[str, object] = {
         "before_counts": {k: int(v) for k, v in before_counts.items()},
         "after_counts": {k: int(v) for k, v in after_counts.items()},
-        "dropped_missing_or_low_tpm": {k: int(v) for k, v in dropped.items()},
+        "dropped_missing_or_low_tpm": dict(dropped),
+        "regulated_exempt_from_matching": dict(reg_exempt_counts),
         "regulated_bin_edges": [float(x) for x in edges],
         "regulated_bin_counts": [int(x) for x in reg_counts.tolist()],
         "negative_summary": neg_summary,
