@@ -30,7 +30,8 @@ def load_rmats_data(de_file, min_ctrl, max_ctrl, max_inclusion,
             "(missing 'exonStart_0base' column)"
         )
 
-    rmats = rmats[rmats['chr'].isin(chroms)]
+    # NOTE: do not filter by chroms here — the pipeline does that (and
+    # may first auto-convert chrom naming via --hg38_chr_autodetect).
 
     # Compute max PSI across all samples
     rmats['inclusion'] = (
