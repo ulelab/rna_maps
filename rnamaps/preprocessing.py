@@ -47,32 +47,57 @@ def _load_chrom_mapping(mapping_file):
 
 def _pick_chrom_map(src_chroms, target_chroms, ens2gen, gen2ens, label,
                     mapping_file):
-    """Pick which mapping direction best maps src_chroms onto target_chroms."""
-    overlap = set(src_chroms) & set(target_chroms)
-    if len(overlap) > 0 and len(overlap) >= len(set(src_chroms)) * 0.5:
+    """Pick which mapping direction best maps src_chroms onto target_chroms.
+
+    A mapping is preferred whenever it covers strictly more src chroms
+    than naive identity overlap does. This avoids the false-negative
+    case where a long tail of minor contigs happens to share the same
+    name in both Ensembl and GENCODE conventions (e.g. GL/KI accessions,
+    which are identity-mapped in the conversion table). With a pure
+    identity-overlap heuristic, those unplaced contigs alone can push
+    overlap above any fixed threshold and make the picker report
+    "already matches", even when the canonical chromosomes
+    (chr1-22, chrX/Y/M <-> 1-22, X/Y/MT) still need conversion -- which
+    silently produces zero crosslink/exon overlap downstream.
+    """
+    src_set = set(src_chroms)
+    target_set = set(target_chroms)
+    identity_overlap = len(src_set & target_set)
+    n_ens2gen = sum(1 for c in src_set if ens2gen.get(c) in target_set)
+    n_gen2ens = sum(1 for c in src_set if gen2ens.get(c) in target_set)
+    best_mapped = max(n_ens2gen, n_gen2ens)
+
+    if best_mapped > identity_overlap:
+        if n_gen2ens >= n_ens2gen:
+            chrom_map, direction, n_mapped = (
+                gen2ens, "GENCODE -> Ensembl", n_gen2ens
+            )
+        else:
+            chrom_map, direction, n_mapped = (
+                ens2gen, "Ensembl -> GENCODE", n_ens2gen
+            )
+        logging.info(
+            f"--hg38_chr_autodetect: {label} chrom-name conversion "
+            f"({direction}) maps {n_mapped}/{len(src_set)} chroms vs "
+            f"{identity_overlap}/{len(src_set)} via identity; applying "
+            f"conversion."
+        )
+        return chrom_map, direction
+
+    if identity_overlap > 0:
         logging.info(
             f"{label} chrom names already match target "
-            f"({len(overlap)}/{len(set(src_chroms))} overlap); no "
+            f"({identity_overlap}/{len(src_set)} overlap); no "
             f"conversion needed."
         )
         return None, None
 
-    mapped_ens2gen = {c for c in src_chroms
-                      if ens2gen.get(c) in target_chroms}
-    mapped_gen2ens = {c for c in src_chroms
-                      if gen2ens.get(c) in target_chroms}
-
-    if not mapped_ens2gen and not mapped_gen2ens:
-        raise ValueError(
-            f"--hg38_chr_autodetect: {label} chrom names do not match "
-            f"target and could not be mapped via {mapping_file}. "
-            f"{label} chroms (sample): {sorted(set(src_chroms))[:5]}; "
-            f"target chroms (sample): {sorted(set(target_chroms))[:5]}"
-        )
-
-    if len(mapped_ens2gen) >= len(mapped_gen2ens):
-        return ens2gen, "Ensembl -> GENCODE"
-    return gen2ens, "GENCODE -> Ensembl"
+    raise ValueError(
+        f"--hg38_chr_autodetect: {label} chrom names do not match "
+        f"target and could not be mapped via {mapping_file}. "
+        f"{label} chroms (sample): {sorted(src_set)[:5]}; "
+        f"target chroms (sample): {sorted(target_set)[:5]}"
+    )
 
 
 def autodetect_and_convert_bed_chroms(xl_bed, chroms, mapping_file, output_dir):
