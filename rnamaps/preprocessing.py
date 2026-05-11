@@ -1,10 +1,34 @@
 """Shared preprocessing: subsetting, splice-site BED creation, smoothing."""
 
+import gzip
 import logging
 import os
+import shutil
 
 import numpy as np
 import pandas as pd
+
+
+def decompress_if_gz(xl_bed, output_dir):
+    """
+    If ``xl_bed`` is gzipped (``.gz`` extension), decompress it into
+    ``output_dir`` and return the path to the decompressed file. Otherwise
+    return ``xl_bed`` unchanged. The original file is left intact.
+    """
+    if xl_bed is None or not str(xl_bed).lower().endswith('.gz'):
+        return xl_bed
+
+    if not os.path.exists(xl_bed):
+        raise FileNotFoundError(f"Input BED file not found: {xl_bed}")
+
+    os.makedirs(output_dir, exist_ok=True)
+    base = os.path.basename(xl_bed)
+    out_path = os.path.join(output_dir, base[:-3])
+
+    logging.info(f"Decompressing gzipped BED file: {xl_bed} -> {out_path}")
+    with gzip.open(xl_bed, 'rb') as f_in, open(out_path, 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
+    return out_path
 
 
 def _load_chrom_mapping(mapping_file):

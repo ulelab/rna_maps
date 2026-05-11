@@ -27,6 +27,7 @@ from rnamaps.preprocessing import (
     apply_subsetting,
     autodetect_and_convert_bed_chroms,
     autodetect_and_convert_df_chroms,
+    decompress_if_gz,
     get_ss_bed,
 )
 
@@ -353,6 +354,8 @@ def run_rna_map(args):
             xl_bed = args.inputxlsites
             window = args.window
             smoothing = args.smoothing
+
+            xl_bed = decompress_if_gz(xl_bed, output_dir)
 
             if getattr(args, 'hg38_chr_autodetect', False):
                 xl_bed = autodetect_and_convert_bed_chroms(
