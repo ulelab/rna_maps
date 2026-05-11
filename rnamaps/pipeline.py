@@ -47,6 +47,7 @@ def _run_method(method, region_per_exon_df, region_fisher_linegraph,
             pseudocount=args.pseudocount,
             pseudocount_frac=args.pseudocount_frac,
             bootstrap_control_fixed=args.bootstrap_control_fixed,
+            smoothing=smoothing,
         )
     if method == 'cluster_perm':
         return enrich_cluster.compute(
@@ -88,9 +89,13 @@ def _plot_method(method, plot_df, clusters_df, exon_categories,
     """Render one PDF (or two for bootstrap_contrast) for a method's
     accumulated per-region results."""
     if method == 'bootstrap_contrast':
-        subtitle = (f"Bootstrap contrast (B={args.n_boot})"
-                    + (' [ctrl fixed]'
-                       if args.bootstrap_control_fixed else ''))
+        smooth_str = (f", smooth={args.smoothing}"
+                      if getattr(args, 'smoothing', 1)
+                      and args.smoothing > 1 else "")
+        ctrl_str = (' [ctrl fixed]'
+                    if args.bootstrap_control_fixed else '')
+        subtitle = (f"Bootstrap contrast (B={args.n_boot}"
+                    f"{smooth_str}){ctrl_str}")
         for y_col, ylab in [
             ('delta', 'mean coverage difference (cat - ctrl)'),
             ('log2fc', 'log2 fold change vs control'),

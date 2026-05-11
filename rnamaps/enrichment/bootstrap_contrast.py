@@ -11,6 +11,13 @@ their 2.5/97.5 percentile bands:
 The bootstrap reflects sampling uncertainty in the estimator. It does
 *not* correct for bias from contaminated controls (silently regulated
 exons in the control pool). Use the ``--control_set`` flag for that.
+
+When ``smoothing > 1``, each bootstrap iteration's per-position contrast
+is convolved with a centred Gaussian-weighted rolling mean (matching the
+kernel in ``rnamaps.permutation._smooth``) *before* taking the across-
+iteration mean and percentiles. Smoothing first makes the CI band the
+correct uncertainty band for the smoothed estimator; smoothing the
+percentiles afterwards would understate uncertainty at sharp features.
 """
 
 from __future__ import annotations
@@ -23,6 +30,36 @@ import pandas as pd
 
 from rnamaps.enrichment._base import EnrichmentResult
 from rnamaps.permutation import _build_coverage_matrix
+
+
+def _smooth_along_positions(
+    arr: np.ndarray, smoothing: int
+) -> np.ndarray:
+    """Centred Gaussian rolling-mean smoothing along the position axis.
+
+    Matches ``rnamaps.permutation._smooth`` (window ``smoothing``, Gaussian
+    weights with ``std=2``). Accepts a 1D ``(n_pos,)`` array or a 2D
+    ``(n_boot, n_pos)`` array; for the 2D case each bootstrap row is
+    smoothed independently in vectorised C via ``DataFrame.rolling``.
+
+    Edge positions where the window does not fully fit become NaN, mirroring
+    the existing permutation-test behaviour.
+    """
+    if smoothing is None or smoothing <= 1:
+        return arr
+    if arr.ndim == 1:
+        s = pd.Series(arr)
+        return s.rolling(
+            smoothing, center=True, win_type='gaussian'
+        ).mean(std=2).to_numpy()
+    # 2D: transpose so positions are rows and each bootstrap iteration is a
+    # column; pandas rolls along axis 0 (the default) per-column → smooths
+    # each bootstrap row in vectorised C. Transpose back at the end.
+    df = pd.DataFrame(arr.T)
+    smoothed = df.rolling(
+        smoothing, center=True, win_type='gaussian'
+    ).mean(std=2).to_numpy()
+    return smoothed.T
 
 
 def _bootstrap_means(
@@ -105,6 +142,7 @@ def compute(
     pseudocount: Optional[float] = None,
     pseudocount_frac: float = 0.01,
     bootstrap_control_fixed: bool = False,
+    smoothing: int = 1,
     control_label: str = "control",
     ci_low: float = 2.5,
     ci_high: float = 97.5,
@@ -133,6 +171,11 @@ def compute(
         If True, treat the control mean as a constant and skip resampling
         the control group. Equivalent up to negligible variance when
         ``n_ctrl >= 2000`` and ~5-10x faster.
+    smoothing : int
+        Centred Gaussian rolling-mean window (in positions) applied to
+        each bootstrap iteration's ``delta`` / ``log2fc`` before taking
+        the across-iteration mean and percentiles. ``smoothing <= 1``
+        disables smoothing. Matches the kernel used by ``permutation_z``.
     control_label : str
     ci_low, ci_high : float
         Percentile bounds for the CI band.
@@ -198,16 +241,22 @@ def compute(
         delta_b = cat_means - ctrl_means
         log2fc_b = np.log2((cat_means + eps_) / (ctrl_means + eps_))
 
+        # Smooth each bootstrap iteration along the position axis before
+        # collapsing to mean/percentiles so the CI band is the uncertainty
+        # of the smoothed estimator, not the smoothed uncertainty.
+        delta_b = _smooth_along_positions(delta_b, smoothing)
+        log2fc_b = _smooth_along_positions(log2fc_b, smoothing)
+
         cat_df = pd.DataFrame({
             'name': cat,
             'position': positions,
             'label': label,
-            'delta': delta_b.mean(axis=0),
-            'delta_lo': np.percentile(delta_b, ci_low, axis=0),
-            'delta_hi': np.percentile(delta_b, ci_high, axis=0),
-            'log2fc': log2fc_b.mean(axis=0),
-            'log2fc_lo': np.percentile(log2fc_b, ci_low, axis=0),
-            'log2fc_hi': np.percentile(log2fc_b, ci_high, axis=0),
+            'delta': np.nanmean(delta_b, axis=0),
+            'delta_lo': np.nanpercentile(delta_b, ci_low, axis=0),
+            'delta_hi': np.nanpercentile(delta_b, ci_high, axis=0),
+            'log2fc': np.nanmean(log2fc_b, axis=0),
+            'log2fc_lo': np.nanpercentile(log2fc_b, ci_low, axis=0),
+            'log2fc_hi': np.nanpercentile(log2fc_b, ci_high, axis=0),
             'pseudocount': eps_,
         })
         plot_rows.append(cat_df)
