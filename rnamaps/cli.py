@@ -182,7 +182,7 @@ def cli():
     boot_group.add_argument(
         '--bootstrap_control_fixed', action='store_true',
         help='Treat control mean as a constant (skip resampling control). '
-             'Equivalent up to negligible variance when n_ctrl >> n_cat '
+             'Equivalent up to negligible variance when n_ctrl >> n_c '
              'and 5-10x faster.')
     boot_group.add_argument(
         '--pseudocount', type=float, default=None,

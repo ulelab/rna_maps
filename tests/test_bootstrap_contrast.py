@@ -169,6 +169,29 @@ def test_result_schema_and_metadata():
     assert set(res.y_columns) == {'delta', 'log2fc'}
 
 
+def test_smoothing_widens_no_signal_curve():
+    """Heavy smoothing should reduce per-position fluctuations under H0."""
+    rng = np.random.default_rng(8)
+    matrix = rng.poisson(lam=0.5, size=(60, 30)).astype(float)
+    names = ['enhanced'] * 30 + ['control'] * 30
+    positions = np.arange(30)
+    df = _make_df(matrix, names, positions)
+    exon_categories = pd.Series({'enhanced': 30, 'control': 30})
+
+    raw = compute(df, exon_categories, label='middle_3ss',
+                  rng=np.random.default_rng(8), n_boot=200,
+                  smoothing=1).plot_df
+    smoothed = compute(df, exon_categories, label='middle_3ss',
+                       rng=np.random.default_rng(8), n_boot=200,
+                       smoothing=11).plot_df
+    raw_e = raw[raw['name'] == 'enhanced']['delta'].to_numpy()
+    sm_e = smoothed[smoothed['name'] == 'enhanced']['delta'].dropna().to_numpy()
+
+    assert np.nanstd(sm_e) < np.nanstd(raw_e), (
+        "Smoothed delta should fluctuate less than raw delta under H0."
+    )
+
+
 def test_missing_control_raises():
     rng = np.random.default_rng(6)
     df = _make_df(np.zeros((4, 3)), ['enhanced'] * 4, np.arange(3))

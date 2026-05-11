@@ -45,12 +45,19 @@ def get_coverage_plot(xl_bed, df, fai, window, exon_categories, label,
     heatmap_plot = df_plot.copy()
     heatmap_plot['label'] = label
 
-    # Per-exon × per-position long-form coverage (used by permutation test).
-    # Kept before aggregation so callers can access the un-summed table.
+    # Per-exon × per-position long-form coverage (used by every per-exon
+    # enrichment method: bootstrap_contrast, permutation_z, cluster_perm).
+    # Binarise to 0/1 here so each (exon, position) cell answers "did this
+    # exon have at least one crosslink at this base?" rather than reporting
+    # raw read counts. This makes mean(category) the fraction of category
+    # exons positive at that position, which is the unit of biological
+    # interest and avoids letting a handful of highly expressed exons
+    # dominate per-exon statistics.
     df_per_exon = df_plot[['exon_id', 'name', 'position', 'coverage']].copy()
     df_per_exon['label'] = label
+    df_per_exon['coverage'] = (df_per_exon['coverage'] > 0).astype(np.int8)
 
-    # Aggregate coverage
+    # Aggregate raw (un-binarised) coverage for the legacy Fisher path.
     df_plot = df_plot.groupby(
         ['name', 'position'], as_index=False
     ).agg({'coverage': 'sum'})

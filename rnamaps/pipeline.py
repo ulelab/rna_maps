@@ -97,8 +97,10 @@ def _plot_method(method, plot_df, clusters_df, exon_categories,
         subtitle = (f"Bootstrap contrast (B={args.n_boot}"
                     f"{smooth_str}){ctrl_str}")
         for y_col, ylab in [
-            ('delta', 'mean coverage difference (cat - ctrl)'),
-            ('log2fc', 'log2 fold change vs control'),
+            ('delta',
+             'fraction of category exons positive - control fraction'),
+            ('log2fc',
+             'log2 fold change vs control'),
         ]:
             plot_rna_map(
                 plot_df, exon_categories, original_counts,

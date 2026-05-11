@@ -10,7 +10,7 @@ Authors: charlotte.capitanchik@crick.ac.uk; leomwilkinson@gmail.com; aram.amalie
 1. **rMATS mode** — takes rMATS differential splicing output and auto-categorises exons from dPSI/FDR thresholds
 2. **VastDB mode** — takes pre-curated VastDB EVENT ID lists with categories already assigned
 
-Both modes feed into the same analysis pipeline: splice site BED creation, CLIP coverage calculation, one or more enrichment analyses (bootstrap contrast / cluster permutation / legacy Fisher / legacy permutation z-score), RNA map plotting, per-exon heatmaps, and exon length distributions.
+Both modes feed into the same analysis pipeline: splice site BED creation, CLIP coverage calculation, per-exon binarisation (each exon × position cell becomes 0/1 = "has at least one crosslink at this base"), one or more enrichment analyses (bootstrap contrast / cluster permutation / legacy Fisher / legacy permutation z-score), RNA map plotting, per-exon heatmaps, and exon length distributions.
 
 ---
 
@@ -153,7 +153,10 @@ Required arguments (both modes):
 Optional arguments:
   -o, --outputpath      Output folder [DEFAULT: current directory]
   -w, --window          Window around splice sites [DEFAULT: 300]
-  -s, --smoothing       Smoothing window [DEFAULT: 15]
+  -s, --smoothing       Smoothing window [DEFAULT: 15]. Centred
+                        Gaussian rolling mean applied to each bootstrap
+                        iteration's per-position delta/log2fc (and to
+                        permutation_z / fisher -log10(p)).
   --seed                Random seed for reproducible permutations / subsetting [DEFAULT: 42]
   -nc, --no_constitutive  Exclude constitutive category
   -ns, --no_subset      Disable subsetting of control/constitutive exons
@@ -198,7 +201,7 @@ Bootstrap contrast options (--enrichment bootstrap_contrast):
   --bootstrap_control_fixed
                         Treat control mean as a constant (skip resampling
                         control). Equivalent to full bootstrap up to
-                        negligible variance when n_ctrl >> n_cat.
+                        negligible variance when n_ctrl >> n_c.
   --pseudocount         Override adaptive log2FC pseudocount with a fixed
                         value [DEFAULT: adaptive].
   --pseudocount_frac    Adaptive pseudocount fraction of the regional
@@ -386,7 +389,7 @@ Setting the same seed produces identical results across runs.
 
 | Method | Output | Use when |
 |---|---|---|
-| `bootstrap_contrast` *(default)* | per-position `delta` and `log2fc` with bootstrap CI ribbons | You want signed effect size + uncertainty, not a p-value. Especially good when n_ctrl >> n_cat or you want to compare maps from different libraries. |
+| `bootstrap_contrast` *(default)* | per-position `delta` and `log2fc` with bootstrap CI ribbons | You want signed effect size + uncertainty, not a p-value. Both contrasts are `n_c`-invariant, so they reward higher per-exon coverage rate rather than larger categories. Especially good when `n_ctrl >> n_c` or you want to compare maps from different libraries. |
 | `cluster_perm` | per-cluster p-values, plot of Welch t with significance bars | You want significance per peak with FWER control across positions and don't want a saturating p-value floor. |
 | `permutation_z` | signed -log10(p) and z-score per position | Legacy: per-position significance via label-permutation z-score. Useful for comparing to historical results. |
 | `fisher` | signed -log10(p) per position | Legacy: per-position Fisher's exact test. Subsetting of control/constitutive is auto-enabled (others auto-disable it). |
@@ -395,32 +398,55 @@ You can pass multiple methods at once: `--enrichment bootstrap_contrast cluster_
 
 ### `bootstrap_contrast` (default)
 
-For each non-control category `c` vs. control:
+**Per-exon binarisation.** Before any per-exon enrichment method runs,
+the per-exon coverage matrix is binarised to 0/1 per (exon, base): each
+cell answers *"did this exon have at least one crosslink at this base?"*
+rather than reporting a raw read count. This makes
+`mean_cov_c(p)` the **fraction of category exons positive at position
+`p`**, and prevents a handful of highly-expressed exons from dominating
+per-exon statistics through their read counts alone. The legacy
+`fisher` path still uses raw read totals; only the per-exon methods
+(`bootstrap_contrast`, `cluster_perm`, `permutation_z`) operate on the
+binarised matrix.
+
+For each non-control category `c` vs. control, let `n_c` be the number
+of exons in `c` and `n_ctrl` the number of control exons:
 
 1. Resample `n_c` exons with replacement from `c` and `n_ctrl` from
    control, `B = --n_boot` times.
-2. Per iteration `b`, compute `mean_cov_c^b(p)` and `mean_cov_ctrl^b(p)`.
-3. Report two contrasts per position with their `(2.5, 97.5)` percentile
-   bands across `b`:
+2. Per iteration `b`, compute `mean_cov_c^b(p)` and `mean_cov_ctrl^b(p)`
+   (a fraction in `[0, 1]` after binarisation: "fraction of exons in
+   the resample positive at position `p`").
+3. Report two contrasts per position with their `(2.5, 97.5)`
+   percentile bands across `b`:
 
-   - `delta(p) = mean_cov_c(p) - mean_cov_ctrl(p)` (additive scale).
-   - `log2fc(p) = log2((mean_cov_c(p) + ε) / (mean_cov_ctrl(p) + ε))`
-     (multiplicative scale, library-size invariant).
+   - `delta(p) = mean_cov_c(p) - mean_cov_ctrl(p)` — additive, rate
+     scale. Invariant to `n_c`: it rewards a higher *fraction* of
+     category exons being positive at `p`, not larger categories.
+   - `log2fc(p) = log2((mean_cov_c(p) + ε) / (mean_cov_ctrl(p) + ε))` —
+     multiplicative scale, library-size invariant.
 
    Where the CI band excludes 0, the contrast is "significant" in a
    bootstrap sense, with no p-value involved.
 
-**Class imbalance** (e.g. n_ctrl=10000, n_cat=500) is handled cleanly: the
-bootstrap variance of `mean_cov_ctrl(p)` is negligible, so the CI on the
-contrast reflects the cat-side variance, which is the right behaviour.
-For a 5-10× speed-up at large `n_ctrl`, pass
+**Smoothing.** When `--smoothing > 1` (default 15), each bootstrap
+iteration's per-position `delta_b` and `log2fc_b` are convolved with a
+centred Gaussian-weighted rolling mean **before** taking the across-
+iteration mean and percentiles. Smoothing first makes the CI band the
+correct uncertainty band for the smoothed estimator; smoothing the
+percentiles afterwards would understate uncertainty at sharp features.
+
+**Class imbalance** (e.g. `n_ctrl = 10000`, `n_c = 500`) is handled
+cleanly: the bootstrap variance of `mean_cov_ctrl(p)` is negligible, so
+the CI on the contrast reflects the category-side variance, which is the
+right behaviour. For a 5-10× speed-up at large `n_ctrl`, pass
 `--bootstrap_control_fixed` to skip resampling control entirely (treat
 its mean as a constant). The pipeline auto-suggests this when
-`n_ctrl ≥ 20 × n_cat`.
+`n_ctrl ≥ 20 × n_c`.
 
 **Pseudocount for log2fc** is adaptive by default:
 `ε = max(1e-3, --pseudocount_frac × median(mean_cov_ctrl over region))`.
-This avoids inflated log2FCs at sparse positions when `n_cat` is small.
+This avoids inflated log2FCs at sparse positions when `n_c` is small.
 Override with `--pseudocount FLOAT`.
 
 **Important**: the bootstrap reflects sampling uncertainty in the

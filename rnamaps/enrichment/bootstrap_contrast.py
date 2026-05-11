@@ -8,6 +8,12 @@ their 2.5/97.5 percentile bands:
 - ``log2fc(p) = log2((mean_cov_cat(p) + eps) / (mean_cov_ctrl(p) + eps))``
   (multiplicative scale, library-size invariant).
 
+Both contrasts are computed on a 0/1 per-exon coverage matrix (set in
+``rnamaps.coverage.get_coverage_plot``), so ``mean_cov_*`` is "fraction
+of exons positive at this base." This means ``delta`` and ``log2fc``
+reward categories where a higher *proportion* of exons are covered,
+without rewarding raw category size.
+
 The bootstrap reflects sampling uncertainty in the estimator. It does
 *not* correct for bias from contaminated controls (silently regulated
 exons in the control pool). Use the ``--control_set`` flag for that.
