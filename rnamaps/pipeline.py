@@ -7,10 +7,11 @@ import sys
 import numpy as np
 import pandas as pd
 
-from rnamaps.coverage import get_coverage_plot
+from rnamaps.coverage import detect_nontrivial_bed_scores, get_coverage_plot
 from rnamaps.enrichment import EnrichmentResult
 from rnamaps.enrichment import bootstrap_contrast as enrich_bootstrap
 from rnamaps.enrichment import cluster_perm as enrich_cluster
+from rnamaps.enrichment import roc_auc as enrich_roc_auc
 from rnamaps.expression_matching import (
     attach_tpm_to_exons,
     load_tpm_table,
@@ -21,7 +22,12 @@ from rnamaps.io_vastdb import load_vastdb_data
 from rnamaps.logging_utils import log_runtime, setup_logging
 from rnamaps.multivalency import plot_multivalency
 from rnamaps.permutation import compute_permutation_pvalues
-from rnamaps.plots import plot_exon_lengths, plot_heatmap, plot_rna_map
+from rnamaps.plots import (
+    plot_exon_lengths,
+    plot_heatmap,
+    plot_rna_map,
+    plot_roc_curves,
+)
 from rnamaps.preprocessing import (
     apply_control_set,
     apply_subsetting,
@@ -32,7 +38,7 @@ from rnamaps.preprocessing import (
 )
 
 
-def _run_method(method, region_per_exon_df, region_fisher_linegraph,
+def _run_method(method, region_cov, region_fisher_linegraph,
                 exon_categories, region_label, args, rng, smoothing):
     """Dispatch a single enrichment method on one splice-site region.
 
@@ -40,27 +46,42 @@ def _run_method(method, region_per_exon_df, region_fisher_linegraph,
     -------
     EnrichmentResult or None
     """
+    binarise = getattr(args, 'binarise', True)
     if method == 'bootstrap_contrast':
         return enrich_bootstrap.compute(
-            region_per_exon_df, exon_categories, region_label,
+            region_cov, exon_categories, region_label,
             rng=rng,
             n_boot=args.n_boot,
+            shrinkage=getattr(args, 'shrinkage', 'magnitude'),
+            shrinkage_scale=getattr(args, 'shrinkage_scale', None),
             pseudocount=args.pseudocount,
             pseudocount_frac=args.pseudocount_frac,
             bootstrap_control_fixed=args.bootstrap_control_fixed,
             smoothing=smoothing,
+            binarise=binarise,
         )
     if method == 'cluster_perm':
         return enrich_cluster.compute(
-            region_per_exon_df, exon_categories, region_label,
+            region_cov, exon_categories, region_label,
             rng=rng,
             n_perm=args.n_perm,
             cluster_thresh=args.cluster_thresh,
+            binarise=binarise,
+        )
+    if method == 'roc_auc':
+        return enrich_roc_auc.compute(
+            region_cov, exon_categories, region_label,
+            rng=rng,
+            roc_aggregator=getattr(args, 'roc_aggregator', 'both'),
+            n_perm=getattr(args, 'roc_n_perm', 0),
+            smoothing=smoothing,
+            binarise=False,
         )
     if method == 'permutation_z':
         plot_df, clusters_df = compute_permutation_pvalues(
-            region_per_exon_df, exon_categories, region_label,
+            region_cov, exon_categories, region_label,
             n_perm=args.n_perm, smoothing=smoothing, rng=rng,
+            binarise=binarise,
         )
         y_col = ('zscore' if getattr(args, 'y_axis', 'log10p') == 'zscore'
                  else '-log10pvalue_smoothed')
@@ -86,29 +107,42 @@ def _run_method(method, region_per_exon_df, region_fisher_linegraph,
 
 
 def _plot_method(method, plot_df, clusters_df, exon_categories,
-                 original_counts, window, args, output_dir, FILEname):
+                 original_counts, window, args, output_dir, FILEname,
+                 roc_curves_df=None, region_auc_df=None,
+                 xl_score_mode=None):
     """Render one PDF (or two for bootstrap_contrast) for a method's
-    accumulated per-region results."""
+    accumulated per-region results.
+
+    ``xl_score_mode`` is the BED-score handling used to build the
+    underlying coverage matrices; it's woven into the output PDF
+    filenames only when the pipeline is sweeping multiple modes (so
+    single-mode runs keep their backward-compatible names)."""
+    suffix = f"_xlscore-{xl_score_mode}" if xl_score_mode else ""
     if method == 'bootstrap_contrast':
         smooth_str = (f", smooth={args.smoothing}"
                       if getattr(args, 'smoothing', 1)
                       and args.smoothing > 1 else "")
         ctrl_str = (' [ctrl fixed]'
                     if args.bootstrap_control_fixed else '')
+        shrinkage_mode = getattr(args, 'shrinkage', 'magnitude')
+        shrinkage_str = f", shrinkage={shrinkage_mode}"
         subtitle = (f"Bootstrap contrast (B={args.n_boot}"
-                    f"{smooth_str}){ctrl_str}")
+                    f"{smooth_str}{shrinkage_str}){ctrl_str}")
         for y_col, ylab in [
             ('delta',
              'fraction of category exons positive - control fraction'),
             ('log2fc',
              'log2 fold change vs control'),
+            ('log_odds_ratio',
+             'log odds ratio (logit(cat) - logit(ctrl))'),
         ]:
             plot_rna_map(
                 plot_df, exon_categories, original_counts,
                 window, args.all_sites, output_dir, FILEname,
                 plot_kind='ribbon', y_col=y_col,
                 ci_cols=(f'{y_col}_lo', f'{y_col}_hi'),
-                method_name=y_col, ylabel=ylab, subtitle=subtitle,
+                method_name=f"{y_col}{suffix}",
+                ylabel=ylab, subtitle=subtitle,
             )
         return
     if method == 'cluster_perm':
@@ -119,7 +153,7 @@ def _plot_method(method, plot_df, clusters_df, exon_categories,
             window, args.all_sites, output_dir, FILEname,
             plot_kind='clusters', y_col='t_obs',
             clusters_df=clusters_df,
-            method_name='cluster_perm',
+            method_name=f'cluster_perm{suffix}',
             ylabel='Welch t (cluster permutation)',
             subtitle=subtitle,
         )
@@ -130,7 +164,7 @@ def _plot_method(method, plot_df, clusters_df, exon_categories,
             window, args.all_sites, output_dir, FILEname,
             pvalue_method='permutation', n_perm=args.n_perm,
             y_axis=getattr(args, 'y_axis', 'log10p'),
-            plot_kind='line', method_name='permutation_z',
+            plot_kind='line', method_name=f'permutation_z{suffix}',
         )
         return
     if method == 'fisher':
@@ -138,8 +172,38 @@ def _plot_method(method, plot_df, clusters_df, exon_categories,
             plot_df, exon_categories, original_counts,
             window, args.all_sites, output_dir, FILEname,
             pvalue_method='fisher', plot_kind='line',
-            method_name='fisher',
+            method_name=f'fisher{suffix}',
         )
+        return
+    if method == 'roc_auc':
+        score_mode = xl_score_mode or 'ignore'
+        n_perm = getattr(args, 'roc_n_perm', 0)
+        agg_choice = getattr(args, 'roc_aggregator', 'both')
+        subtitle = (
+            f"Per-position AUC (xl_score={score_mode}, "
+            f"aggregator={agg_choice}"
+            + (f", n_perm={n_perm}" if n_perm > 0 else "")
+            + ")"
+        )
+        # 1. Per-position AUC line plot.
+        plot_rna_map(
+            plot_df, exon_categories, original_counts,
+            window, args.all_sites, output_dir, FILEname,
+            plot_kind='line', y_col='auc_signed_smoothed',
+            method_name=f'roc_auc{suffix}',
+            ylabel='signed AUC (2*(AUC - 0.5)) vs control',
+            subtitle=subtitle,
+        )
+        # 2. Per-region ROC curves.
+        if roc_curves_df is not None and not roc_curves_df.empty:
+            plot_roc_curves(
+                roc_curves_df, region_auc_df, args.all_sites,
+                output_dir, FILEname,
+                aggregators_to_plot=(['mean', 'max']
+                                     if agg_choice == 'both'
+                                     else [agg_choice]),
+                xl_score_mode=xl_score_mode,
+            )
         return
     raise ValueError(f"Unknown enrichment method: {method!r}")
 
@@ -361,155 +425,206 @@ def run_rna_map(args):
                 xl_bed = autodetect_and_convert_bed_chroms(
                     xl_bed, chroms, args.chr_mapping_file, output_dir)
 
-            middle_3ss = get_coverage_plot(
-                xl_bed, middle_3ss_bed, fai, window, exon_categories,
-                'middle_3ss', smoothing)
-            middle_5ss = get_coverage_plot(
-                xl_bed, middle_5ss_bed, fai, window, exon_categories,
-                'middle_5ss', smoothing)
-            downstream_3ss = get_coverage_plot(
-                xl_bed, downstream_3ss_bed, fai, window, exon_categories,
-                'downstream_3ss', smoothing)
-            upstream_5ss = get_coverage_plot(
-                xl_bed, upstream_5ss_bed, fai, window, exon_categories,
-                'upstream_5ss', smoothing)
-
-            linegraph_middle_3ss = middle_3ss[0]
-            linegraph_middle_5ss = middle_5ss[0]
-            linegraph_downstream_3ss = downstream_3ss[0]
-            linegraph_upstream_5ss = upstream_5ss[0]
-
-            heatmap_middle_3ss = middle_3ss[1]
-            heatmap_middle_5ss = middle_5ss[1]
-            heatmap_downstream_3ss = downstream_3ss[1]
-            heatmap_upstream_5ss = upstream_5ss[1]
-
-            per_exon_middle_3ss = middle_3ss[2]
-            per_exon_middle_5ss = middle_5ss[2]
-            per_exon_downstream_3ss = downstream_3ss[2]
-            per_exon_upstream_5ss = upstream_5ss[2]
-
-            if not args.all_sites:
-                plotting_df = pd.concat([
-                    linegraph_upstream_5ss, linegraph_middle_3ss,
-                    linegraph_middle_5ss, linegraph_downstream_3ss
-                ])
-                heat_df = pd.concat([
-                    heatmap_upstream_5ss, heatmap_middle_3ss,
-                    heatmap_middle_5ss, heatmap_downstream_3ss
-                ])
-                per_exon_regions = [
-                    per_exon_upstream_5ss, per_exon_middle_3ss,
-                    per_exon_middle_5ss, per_exon_downstream_3ss,
-                ]
+            # Normalise --xl_score (either a single string -- legacy
+            # access from tests/notebooks -- or a list-of-strings from
+            # the CLI). Single 'ignore' mode keeps backward-compatible
+            # filenames; multi-mode runs add a per-mode suffix.
+            xl_score_arg = getattr(args, 'xl_score', ['ignore'])
+            if isinstance(xl_score_arg, str):
+                xl_score_modes = [xl_score_arg]
             else:
-                downstream_5ss = get_coverage_plot(
-                    xl_bed, downstream_5ss_bed, fai, window,
-                    exon_categories, 'downstream_5ss', smoothing)
-                upstream_3ss = get_coverage_plot(
-                    xl_bed, upstream_3ss_bed, fai, window,
-                    exon_categories, 'upstream_3ss', smoothing)
+                xl_score_modes = list(xl_score_arg) or ['ignore']
+            multi_mode = len(xl_score_modes) > 1
 
-                linegraph_downstream_5ss = downstream_5ss[0]
-                linegraph_upstream_3ss = upstream_3ss[0]
-                heatmap_downstream_5ss = downstream_5ss[1]
-                heatmap_upstream_3ss = upstream_3ss[1]
-                per_exon_downstream_5ss = downstream_5ss[2]
-                per_exon_upstream_3ss = upstream_3ss[2]
-
-                plotting_df = pd.concat([
-                    linegraph_middle_3ss, linegraph_middle_5ss,
-                    linegraph_downstream_3ss, linegraph_downstream_5ss,
-                    linegraph_upstream_3ss, linegraph_upstream_5ss
-                ])
-                heat_df = pd.concat([
-                    heatmap_middle_3ss, heatmap_middle_5ss,
-                    heatmap_downstream_3ss, heatmap_downstream_5ss,
-                    heatmap_upstream_3ss, heatmap_upstream_5ss
-                ])
-                per_exon_regions = [
-                    per_exon_middle_3ss, per_exon_middle_5ss,
-                    per_exon_downstream_3ss, per_exon_downstream_5ss,
-                    per_exon_upstream_3ss, per_exon_upstream_5ss,
-                ]
-
-            # Heatmap (unaffected by enrichment method choice: uses
-            # full per-exon data from the original coverage call).
-            plot_heatmap(heat_df, exon_categories, window, args.all_sites,
-                         output_dir, FILEname)
-
-            # Pair each region's per-exon coverage with its fisher
-            # linegraph (used as-is for --enrichment fisher).
-            if not args.all_sites:
-                fisher_linegraphs = [
-                    linegraph_upstream_5ss, linegraph_middle_3ss,
-                    linegraph_middle_5ss, linegraph_downstream_3ss,
-                ]
-            else:
-                fisher_linegraphs = [
-                    linegraph_middle_3ss, linegraph_middle_5ss,
-                    linegraph_downstream_3ss, linegraph_downstream_5ss,
-                    linegraph_upstream_3ss, linegraph_upstream_5ss,
-                ]
-
-            logging.info("\n" + "=" * 60)
-            logging.info(
-                f"RUNNING ENRICHMENT METHOD(S): "
-                f"{', '.join(enrichment_methods)}"
-            )
-            logging.info("=" * 60)
-
-            # method -> list of EnrichmentResult per region (in order)
-            results_by_method = {m: [] for m in enrichment_methods}
-
-            for region_df, fisher_lg in zip(
-                per_exon_regions, fisher_linegraphs
+            if 'ignore' in xl_score_modes and detect_nontrivial_bed_scores(
+                xl_bed
             ):
-                if region_df.empty:
-                    continue
-                region_label = region_df['label'].iloc[0]
+                logging.warning(
+                    "BED column 5 of %s contains non-trivial scores. "
+                    "--xl_score includes 'ignore', which treats them as "
+                    "presence indicators only. Add (or switch to) --xl_score "
+                    "raw / per_transcript_zscore / per_transcript_sum1 "
+                    "to use the score values.",
+                    xl_bed,
+                )
+            logging.info(f"BED score modes: {xl_score_modes}")
+
+            # ----------------------------------------------------------
+            # 1. Heatmap and totalExonsCovered are xl_score-invariant.
+            #    Compute them once from a binarised "presence" matrix
+            #    (xl_score=ignore). Skip if user explicitly only asked
+            #    for score-aware modes; the heatmap is a "which exons
+            #    have any signal" view, so ignore-mode is always the
+            #    right basis.
+            # ----------------------------------------------------------
+            logging.info("Computing presence-only coverage for heatmap...")
+            heatmap_region_covs = []
+            for region_label_, region_bed_ in [
+                ('upstream_5ss', upstream_5ss_bed),
+                ('middle_3ss', middle_3ss_bed),
+                ('middle_5ss', middle_5ss_bed),
+                ('downstream_3ss', downstream_3ss_bed),
+            ] + ([
+                ('downstream_5ss', downstream_5ss_bed),
+                ('upstream_3ss', upstream_3ss_bed),
+            ] if args.all_sites else []):
+                _, rc_ = get_coverage_plot(
+                    xl_bed, region_bed_, fai, window, exon_categories,
+                    region_label_, smoothing, score_mode='ignore',
+                )
+                heatmap_region_covs.append(rc_)
+            plot_heatmap(heatmap_region_covs, exon_categories, window,
+                         args.all_sites, output_dir, FILEname)
+
+            # ----------------------------------------------------------
+            # 2. Per xl_score mode: compute coverage matrices, run all
+            #    requested enrichment methods, emit per-method outputs
+            #    (with the score-mode suffix when sweeping multiple).
+            # ----------------------------------------------------------
+            for score_mode in xl_score_modes:
+                file_suffix = (f"_xlscore-{score_mode}" if multi_mode
+                               else "")
+                logging.info("\n" + "=" * 60)
+                logging.info(
+                    f"COVERAGE / ENRICHMENT (--xl_score {score_mode})"
+                )
+                logging.info("=" * 60)
+
+                if score_mode == 'ignore':
+                    # Reuse the presence-only matrices already built for
+                    # the heatmap so we don't pay bedtools twice.
+                    region_covs_mode = list(heatmap_region_covs)
+                    fisher_linegraphs_mode = []
+                    for rc_ in region_covs_mode:
+                        # Re-run the fast Fisher-linegraph builder from
+                        # the matrix (no bedtools needed).
+                        from rnamaps.coverage import (
+                            _fisher_linegraph_from_matrix,
+                        )
+                        fisher_linegraphs_mode.append(
+                            _fisher_linegraph_from_matrix(rc_, smoothing)
+                        )
+                else:
+                    region_covs_mode = []
+                    fisher_linegraphs_mode = []
+                    region_specs = [
+                        ('upstream_5ss', upstream_5ss_bed),
+                        ('middle_3ss', middle_3ss_bed),
+                        ('middle_5ss', middle_5ss_bed),
+                        ('downstream_3ss', downstream_3ss_bed),
+                    ]
+                    if args.all_sites:
+                        region_specs.extend([
+                            ('downstream_5ss', downstream_5ss_bed),
+                            ('upstream_3ss', upstream_3ss_bed),
+                        ])
+                    for region_label_, region_bed_ in region_specs:
+                        lg_, rc_ = get_coverage_plot(
+                            xl_bed, region_bed_, fai, window,
+                            exon_categories, region_label_, smoothing,
+                            score_mode=score_mode,
+                        )
+                        fisher_linegraphs_mode.append(lg_)
+                        region_covs_mode.append(rc_)
+
+                # method -> list of EnrichmentResult per region (in order)
+                results_by_method = {m: [] for m in enrichment_methods}
+                for region_cov, fisher_lg in zip(
+                    region_covs_mode, fisher_linegraphs_mode
+                ):
+                    if region_cov.n_exons == 0:
+                        continue
+                    region_label = region_cov.label
+                    for method in enrichment_methods:
+                        res = _run_method(
+                            method, region_cov, fisher_lg,
+                            exon_categories, region_label, args, rng,
+                            smoothing,
+                        )
+                        if res is not None:
+                            results_by_method[method].append(res)
+
                 for method in enrichment_methods:
-                    res = _run_method(
-                        method, region_df, fisher_lg,
-                        exon_categories, region_label, args, rng,
-                        smoothing,
+                    method_results = results_by_method[method]
+                    if not method_results:
+                        logging.warning(
+                            f"[{method}/{score_mode}] No results to plot."
+                        )
+                        continue
+
+                    method_plot_df = pd.concat(
+                        [r.plot_df for r in method_results],
+                        ignore_index=True,
                     )
-                    if res is not None:
-                        results_by_method[method].append(res)
+                    cluster_frames = [
+                        r.clusters_df for r in method_results
+                        if r.clusters_df is not None
+                        and not r.clusters_df.empty
+                    ]
+                    method_clusters_df = (
+                        pd.concat(cluster_frames, ignore_index=True)
+                        if cluster_frames else pd.DataFrame()
+                    )
 
-            logging.info("\n" + "=" * 60)
-            logging.info("PLOTTING RNA MAPS")
-            logging.info("=" * 60)
+                    roc_curves_df = None
+                    region_auc_df = None
+                    if any(getattr(r, 'extras', None)
+                           for r in method_results):
+                        roc_frames = [
+                            r.extras.get('roc_curves_df')
+                            for r in method_results
+                            if r.extras
+                            and r.extras.get('roc_curves_df') is not None
+                            and not r.extras['roc_curves_df'].empty
+                        ]
+                        if roc_frames:
+                            roc_curves_df = pd.concat(
+                                roc_frames, ignore_index=True
+                            )
+                        auc_frames = [
+                            r.extras.get('region_auc_df')
+                            for r in method_results
+                            if r.extras
+                            and r.extras.get('region_auc_df') is not None
+                            and not r.extras['region_auc_df'].empty
+                        ]
+                        if auc_frames:
+                            region_auc_df = pd.concat(
+                                auc_frames, ignore_index=True
+                            )
 
-            for method in enrichment_methods:
-                method_results = results_by_method[method]
-                if not method_results:
-                    logging.warning(f"[{method}] No results to plot.")
-                    continue
-
-                method_plot_df = pd.concat(
-                    [r.plot_df for r in method_results], ignore_index=True
-                )
-                cluster_frames = [r.clusters_df for r in method_results
-                                  if r.clusters_df is not None
-                                  and not r.clusters_df.empty]
-                method_clusters_df = (pd.concat(cluster_frames,
-                                                ignore_index=True)
-                                      if cluster_frames else pd.DataFrame())
-
-                method_plot_df.to_csv(
-                    f'{output_dir}/{FILEname}_RNAmap_{method}.tsv',
-                    sep="\t", index=False,
-                )
-                if not method_clusters_df.empty:
-                    method_clusters_df.to_csv(
-                        f'{output_dir}/{FILEname}_RNAmap_{method}_clusters.tsv',
+                    method_plot_df.to_csv(
+                        f'{output_dir}/{FILEname}_RNAmap_{method}'
+                        f'{file_suffix}.tsv',
                         sep="\t", index=False,
                     )
+                    if not method_clusters_df.empty:
+                        method_clusters_df.to_csv(
+                            f'{output_dir}/{FILEname}_RNAmap_{method}'
+                            f'{file_suffix}_clusters.tsv',
+                            sep="\t", index=False,
+                        )
+                    if roc_curves_df is not None and not roc_curves_df.empty:
+                        roc_curves_df.to_csv(
+                            f'{output_dir}/{FILEname}_RNAmap_{method}'
+                            f'{file_suffix}_roc_curves.tsv',
+                            sep="\t", index=False,
+                        )
+                    if region_auc_df is not None and not region_auc_df.empty:
+                        region_auc_df.to_csv(
+                            f'{output_dir}/{FILEname}_RNAmap_{method}'
+                            f'{file_suffix}_region_auc.tsv',
+                            sep="\t", index=False,
+                        )
 
-                _plot_method(method, method_plot_df, method_clusters_df,
-                             exon_categories, original_counts,
-                             window, args, output_dir, FILEname)
+                    _plot_method(
+                        method, method_plot_df, method_clusters_df,
+                        exon_categories, original_counts,
+                        window, args, output_dir, FILEname,
+                        roc_curves_df=roc_curves_df,
+                        region_auc_df=region_auc_df,
+                        xl_score_mode=(score_mode if multi_mode else None),
+                    )
 
         # ==============================================================
         # MULTIVALENCY (optional, requires germs.R)

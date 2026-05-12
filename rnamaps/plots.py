@@ -14,7 +14,6 @@ from matplotlib.gridspec import GridSpec
 
 from rnamaps.config import colors_dict
 from rnamaps.plot_helpers import add_enrichment_marker, set_legend_text
-from rnamaps.preprocessing import smooth_coverage
 
 
 def plot_exon_lengths(df_rmats, output_dir, FILEname):
@@ -74,32 +73,67 @@ def plot_exon_lengths(df_rmats, output_dir, FILEname):
     logging.info(f"Saved exon length plot to {output_dir}/{FILEname}_exon_length.pdf")
 
 
-def plot_heatmap(heat_df, exon_categories, window, all_sites,
+def _smooth_rows_gaussian(matrix, window_size=10, std=2):
+    """Vectorised per-row Gaussian rolling-mean smoothing along columns.
+
+    Mirrors the previous per-(exon, label) Python loop but runs in C
+    via pandas' ``DataFrame.rolling``. Edge NaNs are filled with the
+    original (unsmoothed) value to match the prior behaviour.
+    """
+    if matrix.size == 0:
+        return matrix.astype(np.float32, copy=False)
+    df = pd.DataFrame(matrix.T.astype(np.float32, copy=False))
+    smoothed = df.rolling(
+        window=window_size, center=True, win_type='gaussian'
+    ).mean(std=std)
+    raw = np.array(df.values, copy=True)
+    sm = np.array(smoothed.values, copy=True)
+    mask = np.isnan(sm)
+    sm[mask] = raw[mask]
+    return sm.T
+
+
+def plot_heatmap(region_covs, exon_categories, window, all_sites,
                  output_dir, FILEname):
-    """Generate per-exon heatmap from binary coverage data."""
-    # Total exons covered table
-    grouped_heat_df = heat_df.groupby(
-        ['exon_id', 'label', 'name']
-    )['coverage'].sum().reset_index()
-    filtered_heat_df = grouped_heat_df[grouped_heat_df['coverage'] > 0]
-    count_heat_df = filtered_heat_df.groupby(
-        ['label', 'name']
-    )['exon_id'].nunique().reset_index()
-    count_heat_df.rename(columns={'exon_id': 'exon_count'}, inplace=True)
+    """Generate per-exon heatmap from per-region coverage matrices.
+
+    Parameters
+    ----------
+    region_covs : list of rnamaps.coverage.RegionCoverage
+        One per splice-site region. Each carries a per-exon × per-position
+        coverage matrix.
+    """
+    # Total exons covered table: count distinct exons with any coverage
+    # within each (label, category) pair.
+    count_rows = []
+    for rc in region_covs:
+        if rc.n_exons == 0:
+            continue
+        any_hit = (rc.matrix > 0).any(axis=1)
+        if not any_hit.any():
+            continue
+        names_with_hit = rc.exon_names[any_hit]
+        unique, counts = np.unique(names_with_hit, return_counts=True)
+        for cat, cnt in zip(unique, counts):
+            count_rows.append({'label': rc.label,
+                               'name': cat,
+                               'exon_count': int(cnt)})
+    count_heat_df = pd.DataFrame(
+        count_rows, columns=['label', 'name', 'exon_count']
+    )
     final_heat_df = count_heat_df.pivot(
         index='name', columns='label', values='exon_count'
-    ).fillna(0).reset_index()
+    ).fillna(0).reset_index() if not count_heat_df.empty else pd.DataFrame(
+        {'name': []}
+    )
     exon_categories_df = exon_categories.reset_index()
     exon_categories_df.columns = ['name', 'total_exons_after_subsetting']
-    final_heat_df = final_heat_df.merge(exon_categories_df, on='name', how='left')
+    final_heat_df = final_heat_df.merge(
+        exon_categories_df, on='name', how='left'
+    )
     final_heat_df.to_csv(
         f'{output_dir}/{FILEname}_totalExonsCovered.tsv', sep="\t", index=False
     )
-
-    # Binarise and smooth
-    df = heat_df.copy()
-    df['coverage'] = (df['coverage'] > 0).astype(int)
-    df = smooth_coverage(df)
 
     if not all_sites:
         labels = ['upstream_5ss', 'middle_3ss', 'middle_5ss', 'downstream_3ss']
@@ -107,47 +141,50 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
         labels = ['upstream_3ss', 'upstream_5ss', 'middle_3ss', 'middle_5ss',
                   'downstream_3ss', 'downstream_5ss']
 
-    # Total signal per exon
-    exon_totals = df.groupby('exon_id')['coverage'].sum().reset_index()
-    exon_totals.columns = ['exon_id', 'total_signal']
+    # Build binarised + smoothed matrices keyed by label, plus a global
+    # per-exon "total signal" used to rank rows. All operations stay in
+    # numpy so we never materialise the (n_exons × n_positions × n_regions)
+    # long-form DataFrame the old path needed.
+    cov_by_label = {rc.label: rc for rc in region_covs}
+    if not cov_by_label:
+        logging.info("No regions for heatmap — skipping")
+        return
 
-    # Remove exons with no signal
-    exons_with_signal = exon_totals[exon_totals['total_signal'] > 0]['exon_id']
-    df = df[df['exon_id'].isin(exons_with_signal)]
-
-    exon_names = df[['exon_id', 'name']].drop_duplicates(
-        subset=['exon_id']
-    ).set_index('exon_id')['name']
-
-    label_data = {}
-    for label in labels:
-        label_df = df[df['label'] == label]
-        if len(label_df) == 0:
-            continue
-        pivot = label_df.pivot_table(
-            index='exon_id', columns='position',
-            values='coverage', fill_value=0
-        )
-        label_data[label] = pivot
-
-    # Common exons
-    common_exons = set()
-    first = True
-    for label, pivot in label_data.items():
-        if first:
-            common_exons = set(pivot.index)
-            first = False
-        else:
-            common_exons = common_exons.union(set(pivot.index))
-
-    if len(common_exons) == 0:
+    # Use the first available region to learn the global exon order /
+    # identity. All regions are built from the same parent exon frame so
+    # exon_ids align row-wise across regions.
+    any_rc = region_covs[0]
+    exon_ids = any_rc.exon_ids
+    exon_names = any_rc.exon_names
+    n_exons = exon_ids.size
+    if n_exons == 0:
         logging.info("No exons with signal for heatmap — skipping")
         return
 
-    exon_info = exon_totals.set_index('exon_id').loc[list(common_exons)]
-    exon_info['name'] = exon_names.loc[exon_info.index]
-    exon_info = exon_info.sort_values(['name', 'total_signal'], ascending=[True, False])
-    sorted_exon_ids = exon_info.index.tolist()
+    total_signal = np.zeros(n_exons, dtype=np.float64)
+    smoothed_by_label = {}
+    for label in labels:
+        if label not in cov_by_label:
+            continue
+        rc = cov_by_label[label]
+        bin_mat = (rc.matrix > 0).astype(np.float32, copy=False)
+        sm = _smooth_rows_gaussian(bin_mat, window_size=10, std=2)
+        smoothed_by_label[label] = sm
+        total_signal += sm.sum(axis=1)
+
+    keep = total_signal > 0
+    if not keep.any():
+        logging.info("No exons with signal for heatmap — skipping")
+        return
+
+    keep_idx = np.flatnonzero(keep)
+    kept_names = exon_names[keep_idx]
+    kept_totals = total_signal[keep_idx]
+
+    # Sort by category, then descending total signal within each category.
+    order = np.lexsort((-kept_totals, kept_names))
+    sorted_idx = keep_idx[order]
+    sorted_exon_ids = exon_ids[sorted_idx].tolist()
 
     # Set up figure
     width = max(15, len(labels) * 4)
@@ -162,7 +199,7 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
     ax_names = fig.add_subplot(gs[0, 0])
     ax_names.patch.set_alpha(0.0)
 
-    names = exon_info['name'].values
+    names = kept_names[order]
     unique_names = sorted(set(names))
     color_palette = plt.cm.tab10.colors[:len(unique_names)]
     name_colors = {n: color_palette[i] for i, n in enumerate(unique_names)}
@@ -177,7 +214,7 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
     sns.heatmap(name_matrix, ax=ax_names, cmap=name_cmap, cbar=False,
                 linewidths=0, rasterized=True)
 
-    # Name group labels
+    # Name group labels (contiguous runs since rows are sorted by name).
     name_groups = {}
     current_name = None
     start_idx = 0
@@ -202,7 +239,7 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
 
     # Plot each region
     for i, label in enumerate(labels):
-        if label not in label_data:
+        if label not in smoothed_by_label:
             ax = fig.add_subplot(gs[0, i + 1])
             ax.set_facecolor('none')
             ax.text(0.5, 0.5, f"No data for {label}", ha='center', va='center')
@@ -211,28 +248,17 @@ def plot_heatmap(heat_df, exon_categories, window, all_sites,
             ax.set_title(label)
             continue
 
-        pivot = label_data[label]
-        position_cols = sorted(pivot.columns)
+        rc = cov_by_label[label]
+        smoothed = smoothed_by_label[label]
+        positions = rc.positions
 
         if '3ss' in label:
             min_pos, max_pos = 0, window + 50
         else:
             min_pos, max_pos = window - 50, window * 2
 
-        position_cols = [pos for pos in position_cols if min_pos <= pos <= max_pos]
-
-        display_matrix = np.zeros((len(sorted_exon_ids), len(position_cols)))
-        row_index = pd.Index(sorted_exon_ids)
-        col_index = pd.Index(position_cols)
-        rows_present = row_index.intersection(pivot.index, sort=False)
-        cols_present = col_index.intersection(pivot.columns, sort=False)
-
-        if len(rows_present) and len(cols_present):
-            row_pos = row_index.get_indexer(rows_present)
-            col_pos = col_index.get_indexer(cols_present)
-            display_matrix[np.ix_(row_pos, col_pos)] = pivot.loc[
-                rows_present, cols_present
-            ].to_numpy()
+        col_mask = (positions >= min_pos) & (positions <= max_pos)
+        display_matrix = smoothed[np.ix_(sorted_idx, col_mask)]
 
         ax = fig.add_subplot(gs[0, i + 1])
         ax.set_facecolor('none')
@@ -497,3 +523,103 @@ def plot_rna_map(plotting_df, exon_categories, original_counts,
     logging.info(f"Saved RNA map to {out_path}")
     plt.close('all')
     pbt.helpers.cleanup()
+
+
+def plot_roc_curves(roc_curves_df, region_auc_df, all_sites,
+                    output_dir, FILEname,
+                    aggregators_to_plot=('mean',),
+                    xl_score_mode=None):
+    """Render per-region ROC curves (one PDF per aggregator).
+
+    Parameters
+    ----------
+    roc_curves_df : pd.DataFrame
+        Columns ``name, label, aggregator, fpr, tpr``. One row per
+        (region, category, aggregator, threshold-step).
+    region_auc_df : pd.DataFrame or None
+        Headline AUC table (one row per region × category × aggregator).
+        Used to print AUC in the legend.
+    all_sites : bool
+        4- vs 6-panel layout, matching ``plot_rna_map``.
+    aggregators_to_plot : iterable of str
+        Subset of ``{'mean', 'max'}`` to render. Each gets its own PDF.
+    xl_score_mode : str, optional
+        BED-score mode that produced these ROC curves. When provided
+        (multi-mode sweep), the output PDF filenames embed it as
+        ``..._xlscore-{mode}_curves_{aggregator}.pdf``; single-mode
+        runs keep the legacy ``..._curves_{aggregator}.pdf`` names.
+    """
+    if roc_curves_df is None or roc_curves_df.empty:
+        logging.info("No ROC curves to plot — skipping")
+        return
+
+    col_order, titles, col_wrap = _layout(all_sites)
+    auc_lookup = {}
+    if region_auc_df is not None and not region_auc_df.empty:
+        for _, row in region_auc_df.iterrows():
+            key = (row['label'], row['name'], row['aggregator'])
+            auc_lookup[key] = float(row['auc'])
+
+    for aggregator in aggregators_to_plot:
+        sub = roc_curves_df[roc_curves_df['aggregator'] == aggregator]
+        if sub.empty:
+            continue
+
+        sns.set(rc={'figure.figsize': (10, 8)})
+        sns.set_style("whitegrid")
+        _, palette = _hue_palette(sub)
+
+        n_panels = len(col_order)
+        n_rows = (n_panels + col_wrap - 1) // col_wrap
+        fig, axes = plt.subplots(
+            n_rows, col_wrap,
+            figsize=(4 * col_wrap, 4 * n_rows),
+            squeeze=False,
+        )
+        axes_flat = axes.flatten()
+
+        for i, region_label in enumerate(col_order):
+            ax = axes_flat[i]
+            region_sub = sub[sub['label'] == region_label]
+            ax.plot([0, 1], [0, 1], color='lightgrey',
+                    linestyle='--', linewidth=1)
+            if region_sub.empty:
+                ax.set_title(f"{titles[i]} (no data)")
+            else:
+                for cat, cat_df in region_sub.groupby('name'):
+                    cat_df = cat_df.sort_values('fpr')
+                    auc_val = auc_lookup.get(
+                        (region_label, cat, aggregator), None
+                    )
+                    label_txt = (f"{cat} (AUC={auc_val:.3f})"
+                                 if auc_val is not None
+                                 else cat)
+                    ax.plot(
+                        cat_df['fpr'].values, cat_df['tpr'].values,
+                        color=palette.get(cat, '#999999'),
+                        linewidth=2, label=label_txt,
+                    )
+                ax.legend(loc='lower right', fontsize=8, frameon=False)
+                ax.set_title(titles[i])
+            ax.set_xlim([-0.01, 1.01])
+            ax.set_ylim([-0.01, 1.01])
+            ax.set_xlabel('False positive rate')
+            ax.set_ylabel('True positive rate')
+
+        for j in range(n_panels, len(axes_flat)):
+            axes_flat[j].set_visible(False)
+
+        fig.suptitle(
+            f"ROC curves (window-{aggregator} per-exon score)",
+            fontsize=10, color='dimgray',
+        )
+        plt.tight_layout(rect=[0, 0, 1, 0.97])
+
+        mode_suffix = f"_xlscore-{xl_score_mode}" if xl_score_mode else ""
+        out_path = (
+            f'{output_dir}/{FILEname}_RNAmap_roc_auc'
+            f'{mode_suffix}_curves_{aggregator}.pdf'
+        )
+        plt.savefig(out_path, bbox_inches='tight')
+        logging.info(f"Saved ROC curves to {out_path}")
+        plt.close(fig)

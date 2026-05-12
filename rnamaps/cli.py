@@ -42,10 +42,27 @@ def cli():
     optional.add_argument(
         '--enrichment', type=str, nargs='+', default=None,
         choices=['permutation_z', 'fisher', 'bootstrap_contrast',
-                 'cluster_perm'],
+                 'cluster_perm', 'roc_auc'],
         help="One or more enrichment methods to run. "
              "[DEFAULT: bootstrap_contrast]. Honours legacy --no-permute "
              "as 'fisher' when --enrichment is not given.")
+    optional.add_argument(
+        '--binarise', dest='binarise', action='store_true', default=True,
+        help="Threshold the per-exon coverage matrix to 0/1 before "
+             "running enrichment (CLIP-style 'did this exon have any "
+             "signal at this base?'). [DEFAULT: on]")
+    optional.add_argument(
+        '--no-binarise', dest='binarise', action='store_false',
+        help="Keep raw continuous values in the per-exon coverage "
+             "matrix. Use this when the -x input is a continuous "
+             "signal (e.g. AI prediction scores or a density track) "
+             "and the per-(exon, position) magnitude is itself "
+             "informative. The test statistics become differences/"
+             "ratios of mean signal levels rather than positive-exon "
+             "fractions. Note: with --enrichment bootstrap_contrast "
+             "--shrinkage magnitude, the default --shrinkage_scale "
+             "(0.05) assumes a [0, 1] rate axis -- override it to "
+             "match the scale of your continuous signal.")
 
     # VASTDB-SPECIFIC ARGUMENTS
     vastdb_group = parser.add_argument_group('VastDB mode options')
@@ -185,13 +202,44 @@ def cli():
              'Equivalent up to negligible variance when n_ctrl >> n_c '
              'and 5-10x faster.')
     boot_group.add_argument(
+        '--shrinkage', type=str, default='none',
+        choices=['none', 'magnitude', 'pseudocount'],
+        help="How log2fc / log_odds_ratio are regularised. 'none' "
+             "(default): no shrinkage. log2fc may produce +-inf "
+             "where one rate is exactly zero; log_odds_ratio clips "
+             "rates into [eps_safe, 1-eps_safe] only to keep the "
+             "logit finite. 'magnitude': both log2fc and "
+             "log_odds_ratio are shrunk toward 0 by a weight that "
+             "depends on the LARGER of the two rates -- not on the "
+             "number of exons. When both rates are small in absolute "
+             "terms (max(cat, ctrl) below the shrinkage scale), the "
+             "contrasts are pulled toward zero; when at least one "
+             "rate is well above the scale, the raw contrast is "
+             "preserved. 'pseudocount': legacy additive epsilon. "
+             "Note: the previous default 'magnitude' assumed a "
+             "[0,1] rate axis (binarised CLIP); for continuous "
+             "inputs via --no-binarise it produced confusing "
+             "shrinkage, hence the new 'none' default.")
+    boot_group.add_argument(
+        '--shrinkage_scale', type=float, default=None,
+        help='Only used with --shrinkage magnitude. Sets the rate '
+             'scale tau at which shrinkage transitions from heavy to '
+             'light. Default (None): tau = 0.05 (5%% rate). Below this '
+             'rate, log2fc / log_odds_ratio are pulled toward zero; '
+             'well above it, the raw contrast is preserved. Pass a '
+             'smaller value (e.g. 0.01) for gentler shrinkage that '
+             'only bites at very small rates, or a larger value for '
+             'more aggressive shrinkage even at moderate rates.')
+    boot_group.add_argument(
         '--pseudocount', type=float, default=None,
-        help='Override adaptive log2FC pseudocount with a fixed value. '
-             'When unset, eps = max(1e-3, --pseudocount_frac * '
+        help='Only used with --shrinkage pseudocount. Override adaptive '
+             'log2FC pseudocount with a fixed value. When unset, '
+             'eps = max(1e-3, --pseudocount_frac * '
              'median(mean_cov_ctrl over region)).')
     boot_group.add_argument(
         '--pseudocount_frac', type=float, default=0.01,
-        help='Adaptive log2FC pseudocount fraction [DEFAULT: 0.01]')
+        help='Only used with --shrinkage pseudocount. Adaptive log2FC '
+             'pseudocount fraction [DEFAULT: 0.01]')
 
     # CLUSTER-PERMUTATION OPTIONS
     cl_group = parser.add_argument_group(
@@ -199,6 +247,48 @@ def cli():
     cl_group.add_argument(
         '--cluster_thresh', type=float, default=2.0,
         help='Cluster-defining |t| threshold [DEFAULT: 2.0]')
+
+    # BED-SCORE / ROC-AUC OPTIONS
+    score_group = parser.add_argument_group(
+        'BED score handling and ROC/AUC options (--enrichment roc_auc)')
+    score_group.add_argument(
+        '--xl_score', type=str, nargs='+', default=['ignore'],
+        choices=['ignore', 'raw',
+                 'per_transcript_zscore', 'per_transcript_sum1'],
+        help="How to use BED column 5 of -x. Accepts one or more "
+             "modes; passing several runs each requested enrichment "
+             "method once per mode and writes per-mode output files. "
+             "The rMATS categorisation, exon-length plot, heatmap, "
+             "and totalExonsCovered table are xl_score-invariant and "
+             "are written only once. "
+             "'ignore' (default) counts each overlap as 1, matching "
+             "the legacy behaviour. 'raw' uses the BED score as-is "
+             "(good for eCLIP integer counts or any pre-normalised "
+             "track). 'per_transcript_zscore' z-scores each "
+             "transcript's score row before aggregation (good for AI "
+             "prediction tracks where absolute score magnitudes are "
+             "not comparable across transcripts). "
+             "'per_transcript_sum1' renormalises each transcript's "
+             "scores to sum to 1 before aggregation (good for AI "
+             "tracks that already produce a probability distribution "
+             "per transcript). The per-transcript modes use BED "
+             "column 4 (name) as the transcript identifier; rows "
+             "with placeholder '.' names are kept but counted as "
+             "their own singleton transcripts.")
+    score_group.add_argument(
+        '--roc_aggregator', type=str, default='both',
+        choices=['mean', 'max', 'both'],
+        help="How to aggregate per-exon signal over the window for the "
+             "per-region ROC curve. 'mean' (or equivalently 'sum' for a "
+             "fixed-width window) rewards broad coverage; 'max' rewards "
+             "sharp localised peaks. 'both' computes mean and max, "
+             "writes both to TSV, and plots mean. [DEFAULT: both]")
+    score_group.add_argument(
+        '--roc_n_perm', type=int, default=0,
+        help="Number of label permutations for AUC null distribution. "
+             "0 (default) skips the null and reports only the observed "
+             "AUC; >0 also reports a permutation p-value per position "
+             "and per region.")
 
     # rMATS-SPECIFIC THRESHOLDS
     rmats_group = parser.add_argument_group('rMATS mode thresholds')

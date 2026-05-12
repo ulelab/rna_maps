@@ -26,6 +26,7 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 
+from rnamaps.coverage import aggregate_legacy_columns
 from rnamaps.enrichment._base import EnrichmentResult
 from rnamaps.permutation import _build_coverage_matrix
 
@@ -97,7 +98,7 @@ def _max_abs_cluster_mass(t: np.ndarray, thresh: float) -> float:
 
 
 def compute(
-    df_per_exon: pd.DataFrame,
+    region,
     exon_categories: pd.Series,
     label: str,
     *,
@@ -105,14 +106,16 @@ def compute(
     n_perm: int = 1000,
     cluster_thresh: float = 2.0,
     control_label: str = "control",
+    binarise: bool = True,
 ) -> EnrichmentResult:
     """Run cluster-based permutation test for each non-control category.
 
     Parameters
     ----------
-    df_per_exon : DataFrame
-        Long-form per-exon coverage with columns ``exon_id``, ``name``,
-        ``position``, ``coverage``, ``label``.
+    region : rnamaps.coverage.RegionCoverage or pd.DataFrame
+        Per-exon coverage for one splice-site region. Long-form
+        DataFrame input is still accepted for backward compat with
+        existing tests.
     exon_categories : Series
         Counts per category.
     label : str
@@ -122,6 +125,10 @@ def compute(
         Number of label permutations.
     cluster_thresh : float
         Cluster-defining ``|t|`` threshold.
+    binarise : bool, default True
+        Whether to threshold the per-exon coverage matrix to 0/1 before
+        computing the Welch t. Set to ``False`` for continuous inputs
+        (e.g. AI prediction scores).
 
     Returns
     -------
@@ -144,7 +151,7 @@ def compute(
 
     for cat in categories:
         matrix, is_cat, positions = _build_coverage_matrix(
-            df_per_exon, cat, control_label
+            region, cat, control_label, binarise=binarise,
         )
         if matrix is None or is_cat.sum() == 0 or n_ctrl_total == 0:
             logging.warning(
@@ -199,11 +206,16 @@ def compute(
             'cluster_pvalue': cluster_pvalue,
         }))
 
-    # Control rows for legend continuity (zero stat).
-    ctrl_positions = sorted(
-        df_per_exon.loc[df_per_exon['name'] == control_label, 'position']
-        .unique()
-    )
+    # Control rows for legend continuity (zero stat). Source the
+    # position grid from the matrix-shaped data when available so this
+    # works with RegionCoverage as well as the legacy DataFrame.
+    if isinstance(region, pd.DataFrame):
+        ctrl_positions = sorted(
+            region.loc[region['name'] == control_label, 'position']
+            .unique()
+        )
+    else:
+        ctrl_positions = region.positions.tolist()
     if ctrl_positions:
         plot_rows.append(pd.DataFrame({
             'name': control_label,

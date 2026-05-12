@@ -18,37 +18,80 @@ import numpy as np
 import pandas as pd
 from scipy import stats as _sstats
 
+from rnamaps.coverage import aggregate_legacy_columns as _aggregate_legacy_columns
+
 
 # Tiny floor to avoid log10(0) at extreme z-scores.
 _PVAL_FLOOR = 1e-300
 
 
-def _build_coverage_matrix(df_per_exon: pd.DataFrame, category: str,
-                           control_label: str = "control"):
-    """Pivot per-exon coverage to a (n_exons × n_positions) matrix.
+def _build_coverage_matrix(region, category: str,
+                           control_label: str = "control",
+                           binarise: bool = True):
+    """Select ``{category, control}`` rows from a :class:`RegionCoverage`.
+
+    Parameters
+    ----------
+    region : rnamaps.coverage.RegionCoverage or pd.DataFrame
+        Either the new compact value object or, for backward compat with
+        existing tests, the legacy long-form per-exon DataFrame.
+    category : str
+        Non-control category to compare against ``control_label``.
+    control_label : str
+    binarise : bool, default True
+        When ``True`` (the historical default), the matrix is thresholded
+        to 0/1 so downstream methods operate on "did this exon have any
+        signal at this position?" semantics. This is the right choice
+        for CLIP crosslinks, where raw counts at a single base are
+        dominated by sequencing-depth noise and the meaningful signal is
+        whether or not an exon was bound. When ``False``, the raw values
+        from the coverage matrix are passed through as ``float64``,
+        which is what you want for continuous inputs (e.g. AI prediction
+        scores, density tracks, or any matrix where the per-(exon,
+        position) magnitude is itself informative). The downstream test
+        statistic ``mean(cat) - mean(ctrl)`` is then literally a
+        difference of mean signal levels rather than a difference of
+        positive-exon fractions.
 
     Returns
     -------
-    matrix : np.ndarray
-        Coverage values, rows = exons in {category, control}, cols = positions.
+    matrix : np.ndarray, shape (n_rows, n_positions)
+        ``float64`` coverage. Rows in ``{category, control_label}``.
+        Binarised iff ``binarise`` is ``True``.
     is_category : np.ndarray (bool)
-        True for rows belonging to ``category``, False for control rows.
     positions : np.ndarray
-        Position values matching the matrix columns (sorted ascending).
     """
-    sub = df_per_exon[df_per_exon['name'].isin([category, control_label])]
-    if sub.empty:
+    # Backward-compat: accept the legacy long-form DataFrame too.
+    if isinstance(region, pd.DataFrame):
+        sub = region[region['name'].isin([category, control_label])]
+        if sub.empty:
+            return None, None, None
+        pivot = sub.pivot_table(
+            index=['name', 'exon_id'], columns='position', values='coverage',
+            fill_value=0, aggfunc='sum'
+        ).sort_index(axis=1)
+        matrix = pivot.to_numpy(dtype=np.float64)
+        if binarise:
+            matrix = (matrix > 0).astype(np.float64, copy=False)
+        is_category = np.asarray(
+            pivot.index.get_level_values('name') == category
+        )
+        positions = pivot.columns.to_numpy()
+        return matrix, is_category, positions
+
+    mask = (region.exon_names == category) | (region.exon_names == control_label)
+    if not mask.any():
         return None, None, None
-    pivot = sub.pivot_table(
-        index=['name', 'exon_id'], columns='position', values='coverage',
-        fill_value=0, aggfunc='sum'
-    ).sort_index(axis=1)
-    matrix = pivot.to_numpy(dtype=np.float64)
-    is_category = np.asarray(
-        pivot.index.get_level_values('name') == category
-    )
-    positions = pivot.columns.to_numpy()
-    return matrix, is_category, positions
+    sub_mat = region.matrix[mask]
+    if sub_mat.size == 0:
+        return None, None, None
+    if binarise:
+        matrix = (sub_mat > 0).astype(np.float64, copy=False)
+    else:
+        matrix = sub_mat.astype(np.float64, copy=False)
+    sub_names = region.exon_names[mask]
+    is_category = (sub_names == category)
+    return matrix, is_category, region.positions.copy()
 
 
 def _permutation_null(matrix: np.ndarray, is_category: np.ndarray,
@@ -110,20 +153,22 @@ def _smooth(values: np.ndarray, smoothing: int) -> np.ndarray:
     return s.rolling(smoothing, center=True, win_type='gaussian').mean(std=2).to_numpy()
 
 
-def compute_permutation_pvalues(df_per_exon: pd.DataFrame,
+def compute_permutation_pvalues(region,
                                 exon_categories: pd.Series,
                                 label: str,
                                 n_perm: int,
                                 smoothing: int,
                                 rng: np.random.Generator,
-                                control_label: str = "control"):
+                                control_label: str = "control",
+                                binarise: bool = True):
     """Compute permutation p-values for every non-control category in a region.
 
     Parameters
     ----------
-    df_per_exon : DataFrame
-        Long-form coverage with columns: exon_id, name (category), position,
-        coverage, label.
+    region : rnamaps.coverage.RegionCoverage or pd.DataFrame
+        Per-exon coverage for one splice-site region. Long-form
+        DataFrame input is still accepted for backward compatibility
+        with existing tests.
     exon_categories : Series
         Counts per category (used to detect available categories).
     label : str
@@ -134,6 +179,14 @@ def compute_permutation_pvalues(df_per_exon: pd.DataFrame,
         Gaussian rolling window applied to signed -log10(p).
     rng : np.random.Generator
     control_label : str
+    binarise : bool, default True
+        Whether to threshold the per-exon coverage matrix to 0/1 before
+        running the test (CLIP-style "did this exon have any signal at
+        this base?" semantics). Set to ``False`` for continuous inputs
+        such as AI prediction scores where the per-position magnitude
+        is itself meaningful; the test statistic then becomes a
+        difference of mean signal levels rather than a difference of
+        positive-exon fractions.
 
     Returns
     -------
@@ -155,38 +208,13 @@ def compute_permutation_pvalues(df_per_exon: pd.DataFrame,
     categories = [c for c in exon_categories.index if c != control_label]
     n_ctrl = int(exon_categories.loc[control_label])
 
-    # Aggregate coverage per (category, position) for the legend / fold-change
-    # columns; matches the existing plot_df schema.
-    agg = df_per_exon.groupby(['name', 'position'], as_index=False).agg(
-        coverage=('coverage', 'sum')
-    )
-    counts = pd.DataFrame({
-        'name': exon_categories.index,
-        'number_exons': exon_categories.values,
-    })
-    agg = agg.merge(counts, on='name', how='left')
-    agg['norm_coverage'] = np.where(
-        agg['coverage'] == 0, 0.0,
-        agg['coverage'] / agg['number_exons']
-    )
-    ctrl_rows = agg[agg['name'] == control_label][
-        ['position', 'coverage', 'number_exons']
-    ].rename(columns={
-        'coverage': 'control_coverage',
-        'number_exons': 'control_number_exons',
-    })
-    agg = agg.merge(ctrl_rows, on='position', how='left')
-    agg['control_norm_coverage'] = (
-        agg['control_coverage'] / agg['control_number_exons']
-    )
-    agg.loc[agg['control_norm_coverage'] == 0, 'control_norm_coverage'] = 1e-6
-    agg['fold_change'] = agg['norm_coverage'] / agg['control_norm_coverage']
+    agg = _aggregate_legacy_columns(region, exon_categories, control_label)
 
     plot_rows = []
 
     for cat in categories:
         matrix, is_cat, positions = _build_coverage_matrix(
-            df_per_exon, cat, control_label
+            region, cat, control_label, binarise=binarise,
         )
         if matrix is None or is_cat.sum() == 0 or n_ctrl == 0:
             logging.warning(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Any, Dict, Tuple
 
 import pandas as pd
 
@@ -22,7 +22,8 @@ class EnrichmentResult:
         Optional cluster-level output (e.g. for cluster-based permutation).
         Empty for methods that don't produce clusters.
     plot_kind : str
-        Hint to the plot layer: one of ``"line"``, ``"ribbon"``, ``"clusters"``.
+        Hint to the plot layer: one of ``"line"``, ``"ribbon"``,
+        ``"clusters"``, ``"roc_auc"``.
     y_columns : tuple of str
         Columns in ``plot_df`` to plot. ``"line"`` plots a single y-column;
         ``"ribbon"`` plots ``y_columns`` and looks for matching ``_lo`` /
@@ -32,6 +33,11 @@ class EnrichmentResult:
         Short identifier used to name the output PDF and TSV files.
     ylabel : str
         Y-axis label for the plot.
+    extras : dict
+        Optional method-specific side-data that doesn't fit the standard
+        per-(category, position) schema (e.g. ROC curve coordinates for
+        ``roc_auc``). The pipeline aggregates this across regions when
+        concatenating per-region results.
     """
 
     plot_df: pd.DataFrame
@@ -40,3 +46,4 @@ class EnrichmentResult:
     y_columns: Tuple[str, ...] = ("-log10pvalue_smoothed",)
     method_name: str = "enrichment"
     ylabel: str = "enrichment"
+    extras: Dict[str, Any] = field(default_factory=dict)

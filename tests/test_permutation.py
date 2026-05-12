@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from rnamaps.permutation import (
+    _build_coverage_matrix,
     _zscore_two_sided_p,
     _permutation_null,
     compute_permutation_pvalues,
@@ -125,3 +126,53 @@ def test_compute_permutation_pvalues_end_to_end():
     assert enh['pvalue'].idxmin() == spike_pos
     # clusters_df is now always empty (cluster output removed).
     assert clusters_df.empty
+
+
+def test_binarise_false_preserves_continuous_magnitudes():
+    """``binarise=False`` keeps raw values; ``binarise=True`` collapses them.
+
+    Designed for the case where the input is a continuous signal (e.g.
+    AI prediction scores). Build a matrix where every cell at the spike
+    position is non-zero in both categories, but the magnitudes differ:
+    ``cat=2.0`` vs ``ctrl=1.0``. After binarisation both categories
+    look identical (all 1s) and the per-position observed statistic is
+    exactly 0, so no signal is detectable. Without binarisation the
+    mean difference is 1.0 and the statistic reflects it.
+    """
+    n_pos = 10
+    spike = 4
+    cat = np.zeros((20, n_pos))
+    ctrl = np.zeros((20, n_pos))
+    cat[:, spike] = 2.0
+    ctrl[:, spike] = 1.0
+    matrix = np.vstack([cat, ctrl])
+    names = ['enhanced'] * 20 + ['control'] * 20
+    positions = np.arange(n_pos)
+    df = _make_df(matrix, names, positions, label='middle_3ss')
+
+    m_bin, _, _ = _build_coverage_matrix(df, 'enhanced', binarise=True)
+    m_raw, _, _ = _build_coverage_matrix(df, 'enhanced', binarise=False)
+    # Binarised matrix is 0/1.
+    assert set(np.unique(m_bin).tolist()).issubset({0.0, 1.0})
+    # Raw matrix preserves the 1.0 and 2.0 values.
+    assert m_raw[:, spike].max() == pytest.approx(2.0)
+    assert m_raw[:, spike].min() == pytest.approx(1.0)
+
+    exon_categories = pd.Series({'enhanced': 20, 'control': 20})
+    rng = np.random.default_rng(3)
+    plot_bin, _ = compute_permutation_pvalues(
+        df, exon_categories, label='middle_3ss',
+        n_perm=200, smoothing=1, rng=rng, binarise=True,
+    )
+    rng = np.random.default_rng(3)
+    plot_raw, _ = compute_permutation_pvalues(
+        df, exon_categories, label='middle_3ss',
+        n_perm=200, smoothing=1, rng=rng, binarise=False,
+    )
+    enh_bin = plot_bin[plot_bin['name'] == 'enhanced'].set_index('position')
+    enh_raw = plot_raw[plot_raw['name'] == 'enhanced'].set_index('position')
+    # Binarisation hides the spike entirely (T_obs = 0 at every position).
+    assert enh_bin.loc[spike, 'T_obs'] == pytest.approx(0.0)
+    # Without binarisation the magnitude difference is recovered:
+    # mean(cat[:, spike]) - mean(ctrl[:, spike]) = 2.0 - 1.0 = 1.0.
+    assert enh_raw.loc[spike, 'T_obs'] == pytest.approx(1.0)
