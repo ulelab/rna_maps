@@ -87,37 +87,6 @@ def test_raw_mode_accumulates_bed_scores():
         os.unlink(overlap.fn)
 
 
-def test_per_transcript_sum1_renormalises_b_names():
-    """Scores within a single B.name should renormalise to sum to 1
-    across the overlap rows that share that name, before accumulating
-    onto the exon matrix.
-    """
-    name_to_row = {"enhanced_e0": 0, "enhanced_e1": 1}
-    n_exons = 2
-    n_pos = 10
-
-    # Two crosslinks share txA (b_name); they should each contribute
-    # 5/(5+5) = 0.5 to their respective positions. Without renorm they
-    # would each contribute 5.0.
-    lines = [
-        ['chr1', 100, 110, 'enhanced_e0', 0, '+',
-         'chr1', 100, 101, 'txA', 5.0, '+'],
-        ['chr1', 200, 210, 'enhanced_e1', 0, '+',
-         'chr1', 200, 201, 'txA', 5.0, '+'],
-    ]
-    overlap = _write_overlap_lines(lines)
-    try:
-        m = _overlap_pairs_to_matrix(
-            overlap, name_to_row, n_exons, n_pos,
-            score_mode='per_transcript_sum1',
-        )
-        # pos = b_start - a_start + 1 = 1 for both rows
-        assert m[0, 0] == 0.5
-        assert m[1, 0] == 0.5
-    finally:
-        os.unlink(overlap.fn)
-
-
 def test_per_transcript_zscore_zero_mean_unit_var_per_tx():
     """A per-transcript z-score within a single transcript should have
     zero mean (with ddof=0) and well-defined values."""
@@ -143,6 +112,120 @@ def test_per_transcript_zscore_zero_mean_unit_var_per_tx():
         np.testing.assert_allclose(
             [m[0, 0], m[1, 0], m[2, 0]], expected, atol=1e-12
         )
+    finally:
+        os.unlink(overlap.fn)
+
+
+def test_multibase_feature_spreads_across_window_plus_strand():
+    """A multi-base B-feature should deposit a count at every base it
+    covers in the A-window, not just at its leftmost base.
+
+    Regression test for the bug where finemapped 75-nt windows were
+    only depositing +1 at b_start.
+    """
+    name_to_row = {"enhanced_e0": 0}
+    n_exons = 1
+    n_pos = 20
+
+    # A-window: chr1:100-120 (so positions 1..20 map to genomic 100..119)
+    # B-feature: chr1:103-108 (5 bases, should hit transcript pos 4..8)
+    lines = [
+        ['chr1', 100, 120, 'enhanced_e0', 0, '+',
+         'chr1', 103, 108, 'b0', 1, '+'],
+    ]
+    overlap = _write_overlap_lines(lines)
+    try:
+        m = _overlap_pairs_to_matrix(
+            overlap, name_to_row, n_exons, n_pos, score_mode='ignore'
+        )
+        # 5 contiguous positions should each have count 1.
+        expected = np.zeros(n_pos, dtype=np.int32)
+        expected[3:8] = 1  # 1-indexed pos 4..8 → 0-indexed cols 3..7
+        np.testing.assert_array_equal(m[0], expected)
+        assert m.sum() == 5
+    finally:
+        os.unlink(overlap.fn)
+
+
+def test_multibase_feature_spreads_across_window_minus_strand():
+    """Same as the +strand test but on - strand: bases should map to
+    the mirrored transcript positions so + and - strand exons share a
+    coordinate system in the matrix.
+    """
+    name_to_row = {"silenced_e0": 0}
+    n_exons = 1
+    n_pos = 20
+
+    # A-window: chr1:100-120, strand -. Transcript pos 1 = genomic 119.
+    # B-feature: chr1:103-108 (genomic bases 103..107).
+    # For - strand: pos = a_end - genomic, so genomic 107..103 → pos 13..17.
+    lines = [
+        ['chr1', 100, 120, 'silenced_e0', 0, '-',
+         'chr1', 103, 108, 'b0', 1, '-'],
+    ]
+    overlap = _write_overlap_lines(lines)
+    try:
+        m = _overlap_pairs_to_matrix(
+            overlap, name_to_row, n_exons, n_pos, score_mode='ignore'
+        )
+        expected = np.zeros(n_pos, dtype=np.int32)
+        expected[12:17] = 1  # 1-indexed pos 13..17 → cols 12..16
+        np.testing.assert_array_equal(m[0], expected)
+        assert m.sum() == 5
+    finally:
+        os.unlink(overlap.fn)
+
+
+def test_multibase_feature_clipped_to_window():
+    """A B-feature that hangs off the end of the A-window should have
+    only its in-window bases counted. bedtools -wa -wb reports the
+    original (unclipped) B coords, so the matrix builder has to clip.
+    """
+    name_to_row = {"enhanced_e0": 0}
+    n_exons = 1
+    n_pos = 10
+
+    # A-window: chr1:100-110 (positions 1..10 = genomic 100..109)
+    # B-feature: chr1:107-115 (extends past the window by 5 bases).
+    # Only genomic 107..109 (3 bases) are in-window → transcript pos 8..10.
+    lines = [
+        ['chr1', 100, 110, 'enhanced_e0', 0, '+',
+         'chr1', 107, 115, 'b0', 1, '+'],
+    ]
+    overlap = _write_overlap_lines(lines)
+    try:
+        m = _overlap_pairs_to_matrix(
+            overlap, name_to_row, n_exons, n_pos, score_mode='ignore'
+        )
+        expected = np.zeros(n_pos, dtype=np.int32)
+        expected[7:10] = 1
+        np.testing.assert_array_equal(m[0], expected)
+        assert m.sum() == 3
+    finally:
+        os.unlink(overlap.fn)
+
+
+def test_multibase_feature_raw_score_replicated_across_bases():
+    """In ``raw`` mode each base of the B-feature should receive the
+    feature's BED score (replicated, not divided by length).
+    """
+    name_to_row = {"enhanced_e0": 0}
+    n_exons = 1
+    n_pos = 10
+
+    # B-feature: 3 bases wide, score 2.5 → each base gets 2.5.
+    lines = [
+        ['chr1', 100, 110, 'enhanced_e0', 0, '+',
+         'chr1', 102, 105, 'b0', 2.5, '+'],
+    ]
+    overlap = _write_overlap_lines(lines)
+    try:
+        m = _overlap_pairs_to_matrix(
+            overlap, name_to_row, n_exons, n_pos, score_mode='raw'
+        )
+        expected = np.zeros(n_pos, dtype=np.float64)
+        expected[2:5] = 2.5
+        np.testing.assert_allclose(m[0], expected)
     finally:
         os.unlink(overlap.fn)
 

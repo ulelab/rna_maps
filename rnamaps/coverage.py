@@ -35,7 +35,7 @@ import scipy.stats as stats
 
 
 _VALID_SCORE_MODES = (
-    "ignore", "raw", "per_transcript_zscore", "per_transcript_sum1"
+    "ignore", "raw", "per_transcript_zscore",
 )
 
 
@@ -138,11 +138,23 @@ def _overlap_pairs_to_matrix(
     - col 2 (A.end, 0-based-exclusive end)
     - col 3 (A.name, ``category_exon-id``)
     - col 5 (A.strand)
-    - col 7 (B.start, 0-based position of the crosslink; B.end = B.start+1)
+    - col 7 (B.start, 0-based start of the B feature)
+    - col 8 (B.end, 0-based-exclusive end of the B feature)
     - col 9 (B.name, the BED-track entry's name; used as the transcript
       identifier for the per-transcript score modes only)
     - col 10 (B.score, the BED-track entry's score; used when
       ``score_mode != 'ignore'``)
+
+    Each B-feature deposits one count (or one ``b_score``, in score modes)
+    at *every* base it covers inside the A-window — B is clipped to A,
+    then expanded to per-base entries. For single-nucleotide iCLIP
+    crosslink BEDs (``b_end == b_start + 1``) this collapses to the
+    legacy single-position behaviour; for wider B features (e.g.
+    finemapped windows, peaks) the signal is spread across all bases
+    they cover. In the ``raw`` / per-transcript score modes each base
+    receives the *same* score (the per-feature value is replicated, not
+    divided by length); if you want length-normalised semantics, divide
+    the BED score by feature length before passing it in.
 
     Position within the window is converted to transcript coordinates
     (1-indexed, 5'→3' of the exon strand) so + and - strand exons share
@@ -150,16 +162,14 @@ def _overlap_pairs_to_matrix(
 
     Parameters
     ----------
-    score_mode : {"ignore", "raw", "per_transcript_zscore", "per_transcript_sum1"}
+    score_mode : {"ignore", "raw", "per_transcript_zscore"}
         ``"ignore"`` (default) counts each overlap as ``+1`` (matrix
         dtype int32; exact legacy behaviour). ``"raw"`` uses the BED
-        score column as-is (matrix becomes float64). The per-transcript
-        modes accumulate ``raw`` first, then renormalise rows of
-        crosslinks sharing the same B.name (transcript) before the
-        usual exon-row accumulation: ``zscore`` produces zero-mean,
-        unit-variance scores per transcript; ``sum1`` rescales so the
-        per-transcript scores sum to 1 (useful for AI probability
-        tracks that drift away from sum-1 after subsetting).
+        score column as-is (matrix becomes float64).
+        ``"per_transcript_zscore"`` accumulates ``raw`` first, then
+        renormalises rows of crosslinks sharing the same B.name
+        (transcript) before the usual exon-row accumulation, producing
+        zero-mean, unit-variance scores per transcript.
     """
     if score_mode not in _VALID_SCORE_MODES:
         raise ValueError(
@@ -177,16 +187,20 @@ def _overlap_pairs_to_matrix(
     # Read only the columns we need. bedtools intersect -wa -wb prefixes
     # A's columns then appends B's; A=0..5, B=6.. -- B may be BED3+ but
     # for the score modes we additionally need B.score (col 10) and
-    # B.name (col 9, per-transcript modes only).
-    base_usecols = [1, 2, 3, 5, 7]
-    base_names = ['a_start', 'a_end', 'a_name', 'a_strand', 'b_start']
+    # B.name (col 9, per-transcript modes only). We always read B.end
+    # (col 8) so that multi-base B features get spread across all the
+    # window bases they cover, not just their leftmost base.
+    base_usecols = [1, 2, 3, 5, 7, 8]
+    base_names = ['a_start', 'a_end', 'a_name', 'a_strand',
+                  'b_start', 'b_end']
     base_dtype = {'a_start': np.int64, 'a_end': np.int64,
-                  'a_name': str, 'a_strand': str, 'b_start': np.int64}
+                  'a_name': str, 'a_strand': str,
+                  'b_start': np.int64, 'b_end': np.int64}
     if score_mode == "raw":
         usecols = base_usecols + [10]
         names = base_names + ['b_score']
         dtype_map = {**base_dtype, 'b_score': np.float64}
-    elif score_mode in ("per_transcript_zscore", "per_transcript_sum1"):
+    elif score_mode == "per_transcript_zscore":
         usecols = base_usecols + [9, 10]
         names = base_names + ['b_name', 'b_score']
         dtype_map = {**base_dtype, 'b_name': str, 'b_score': np.float64}
@@ -206,7 +220,7 @@ def _overlap_pairs_to_matrix(
     if df.empty:
         return matrix
 
-    if score_mode in ("per_transcript_zscore", "per_transcript_sum1"):
+    if score_mode == "per_transcript_zscore":
         # Renormalise B.score *within each B.name (transcript)* across
         # ALL the entries that survived the intersect for this region.
         # Rows whose B.name is the BED placeholder "." are treated as
@@ -220,52 +234,90 @@ def _overlap_pairs_to_matrix(
             g = pd.Series(b_score[~is_singleton]).groupby(
                 pd.Series(b_name[~is_singleton]).values
             )
-            if score_mode == "per_transcript_zscore":
-                # ddof=0 to keep it well-defined at single-entry txs.
-                renormed_vals = g.transform(
-                    lambda s: (s - s.mean()) / s.std(ddof=0) if s.std(ddof=0) > 0 else 0.0
-                ).to_numpy()
-            else:  # per_transcript_sum1
-                renormed_vals = g.transform(
-                    lambda s: s / s.sum() if s.sum() > 0 else 0.0
-                ).to_numpy()
+            # ddof=0 to keep it well-defined at single-entry txs.
+            renormed_vals = g.transform(
+                lambda s: (s - s.mean()) / s.std(ddof=0) if s.std(ddof=0) > 0 else 0.0
+            ).to_numpy()
             tmp = renormed.copy()
             tmp[~is_singleton] = renormed_vals
             renormed = tmp
         df = df.assign(b_score=renormed)
 
-    # Transcript-coordinate position (1-indexed):
-    #   + strand: pos = b_start - a_start + 1
-    #   - strand: pos = a_end - b_start
-    a_strand = df['a_strand'].to_numpy()
-    a_start = df['a_start'].to_numpy()
-    a_end = df['a_end'].to_numpy()
-    b_start = df['b_start'].to_numpy()
-    pos = np.where(
-        a_strand == '+',
-        b_start - a_start + 1,
-        a_end - b_start,
-    )
     # Map exon name -> row index (drop overlaps for names not present,
     # which shouldn't happen in practice but is cheap to guard against).
     rows = df['a_name'].map(name_to_row).to_numpy()
-    valid = (
-        np.isfinite(rows.astype(np.float64, copy=False))
-        & (pos >= 1)
-        & (pos <= n_pos)
+    valid_row = np.isfinite(rows.astype(np.float64, copy=False))
+    if not valid_row.any():
+        return matrix
+
+    a_strand = df['a_strand'].to_numpy()[valid_row]
+    a_start = df['a_start'].to_numpy()[valid_row]
+    a_end = df['a_end'].to_numpy()[valid_row]
+    b_start = df['b_start'].to_numpy()[valid_row]
+    b_end = df['b_end'].to_numpy()[valid_row]
+    rows = rows[valid_row].astype(np.int64, copy=False)
+    if use_scores:
+        scores = df['b_score'].to_numpy()[valid_row].astype(
+            np.float64, copy=False
+        )
+
+    # Clip B to A: bedtools intersect -wa -wb reports the *original* B
+    # interval, which may extend outside the A-window. We only want the
+    # bases that actually fall inside the window.
+    lo = np.maximum(b_start, a_start)
+    hi = np.minimum(b_end, a_end)  # exclusive
+    lengths = hi - lo
+    nonempty = lengths > 0
+    if not nonempty.any():
+        return matrix
+
+    lo = lo[nonempty]
+    lengths = lengths[nonempty]
+    a_strand = a_strand[nonempty]
+    a_start = a_start[nonempty]
+    a_end = a_end[nonempty]
+    rows = rows[nonempty]
+    if use_scores:
+        scores = scores[nonempty]
+
+    # Expand each overlap row into one entry per base it covers in the
+    # window. For a 75-nt feature this produces 75 entries with the same
+    # row index (and the same b_score, in score modes); for the 1-nt
+    # iCLIP case this is a no-op repeat.
+    rows_exp = np.repeat(rows, lengths)
+    strand_exp = np.repeat(a_strand, lengths)
+    a_start_exp = np.repeat(a_start, lengths)
+    a_end_exp = np.repeat(a_end, lengths)
+    # within-feature offset 0..length-1
+    total = int(lengths.sum())
+    group_starts = np.empty_like(lengths)
+    group_starts[0] = 0
+    if lengths.size > 1:
+        group_starts[1:] = np.cumsum(lengths[:-1])
+    within = np.arange(total, dtype=np.int64) - np.repeat(
+        group_starts, lengths
     )
+    genomic = np.repeat(lo, lengths) + within
+
+    # Transcript-coordinate position (1-indexed):
+    #   + strand: pos = genomic - a_start + 1
+    #   - strand: pos = a_end - genomic
+    pos = np.where(
+        strand_exp == '+',
+        genomic - a_start_exp + 1,
+        a_end_exp - genomic,
+    )
+    valid = (pos >= 1) & (pos <= n_pos)
     if not valid.any():
         return matrix
 
-    rows = rows[valid].astype(np.int64, copy=False)
     cols = pos[valid].astype(np.int64, copy=False) - 1
+    rows_exp = rows_exp[valid]
     if use_scores:
-        scores = df['b_score'].to_numpy()[valid].astype(
-            np.float64, copy=False
-        )
-        np.add.at(matrix, (rows, cols), scores)
+        scores_exp = np.repeat(scores, lengths)[valid]
+        np.add.at(matrix, (rows_exp, cols), scores_exp)
     else:
-        np.add.at(matrix, (rows, cols), 1)
+        np.add.at(matrix, (rows_exp, cols), 1)
     return matrix
 
 

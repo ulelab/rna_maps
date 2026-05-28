@@ -253,8 +253,7 @@ def cli():
         'BED score handling and ROC/AUC options (--enrichment roc_auc)')
     score_group.add_argument(
         '--xl_score', type=str, nargs='+', default=['ignore'],
-        choices=['ignore', 'raw',
-                 'per_transcript_zscore', 'per_transcript_sum1'],
+        choices=['ignore', 'raw', 'per_transcript_zscore'],
         help="How to use BED column 5 of -x. Accepts one or more "
              "modes; passing several runs each requested enrichment "
              "method once per mode and writes per-mode output files. "
@@ -267,14 +266,10 @@ def cli():
              "track). 'per_transcript_zscore' z-scores each "
              "transcript's score row before aggregation (good for AI "
              "prediction tracks where absolute score magnitudes are "
-             "not comparable across transcripts). "
-             "'per_transcript_sum1' renormalises each transcript's "
-             "scores to sum to 1 before aggregation (good for AI "
-             "tracks that already produce a probability distribution "
-             "per transcript). The per-transcript modes use BED "
-             "column 4 (name) as the transcript identifier; rows "
-             "with placeholder '.' names are kept but counted as "
-             "their own singleton transcripts.")
+             "not comparable across transcripts). The per-transcript "
+             "mode uses BED column 4 (name) as the transcript "
+             "identifier; rows with placeholder '.' names are kept "
+             "but counted as their own singleton transcripts.")
     score_group.add_argument(
         '--roc_aggregator', type=str, default='both',
         choices=['mean', 'max', 'both'],

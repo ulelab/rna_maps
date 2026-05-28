@@ -224,8 +224,8 @@ Cluster-permutation options (--enrichment cluster_perm):
   --cluster_thresh      Cluster-defining |t| threshold [DEFAULT: 2.0]
 
 BED score handling and ROC/AUC options:
-  --xl_score            One or more of {ignore, raw, per_transcript_zscore,
-                        per_transcript_sum1}. How to use BED column 5 of -x.
+  --xl_score            One or more of {ignore, raw, per_transcript_zscore}.
+                        How to use BED column 5 of -x.
                         Pass several to sweep modes in one invocation.
                         [DEFAULT: ignore]. See "ROC / AUC analysis" below.
   --roc_aggregator      {mean, max, both}. How per-exon signal is collapsed
@@ -547,9 +547,9 @@ controlled by `--xl_score`:
   BED where column 5 is the merged crosslink count, this gives you
   read depth at the base; for an AI track where column 5 is a
   per-base probability, this gives you the AI score at the base.
-- `--xl_score per_transcript_zscore` / `per_transcript_sum1`: same
-  as `raw` but with the BED entries' scores **renormalised within
-  each BED column 4 (`name`) group** before they're accumulated onto
+- `--xl_score per_transcript_zscore`: same as `raw` but with the BED
+  entries' scores **renormalised within each BED column 4 (`name`)
+  group** (z-scored per transcript) before they're accumulated onto
   the exon matrix. See "How `--xl_score` impacts these calculations"
   below.
 
@@ -712,16 +712,13 @@ the crosslink BED.
 | `ignore` (default) | Number of BED rows that overlap exon `i` at base `p`. Each match contributes `+1` regardless of B.score. | iCLIP / eCLIP integer count BEDs where each row already represents one observation. Bit-identical to legacy behaviour. |
 | `raw` | Sum of `B.score` over BED rows overlapping exon `i` at base `p`. | The BED already carries the score you want to use, on a scale that's comparable across rows (e.g. eCLIP merged-crosslink counts, peak heights, pre-normalised AI scores). |
 | `per_transcript_zscore` | Same as `raw`, but `B.score` is replaced by `(B.score − μ_t) / σ_t` *within each B.name = `t`* before the sum. `μ_t`, `σ_t` are the mean and ddof=0 std-dev of B.score within that transcript. Singletons (one entry per transcript) and zero-variance transcripts get a 0 score. | AI tracks whose absolute score magnitudes are **not comparable across transcripts** (e.g. each transcript has its own dynamic range; what counts as "high" in transcript A is different from transcript B). |
-| `per_transcript_sum1` | Same as `raw`, but `B.score` is replaced by `B.score / Σ_t B.score` within each B.name group (a per-transcript renormalisation to sum to 1). | AI tracks that produce a **probability distribution along each transcript** (sums to 1 per transcript). Also fixes the case where you've sliced the BED to a region and the original sum-to-1 invariant got broken. |
-
-**Crucial subtlety for the per-transcript modes.** The renormalisation
+**Crucial subtlety for `per_transcript_zscore`.** The renormalisation
 happens *within the overlap rows that actually intersect a splice-site
 window*. If you slice your BED to only the entries near splice sites,
-the within-transcript renormalisation operates on those slices only —
-which is usually what you want, but it does mean the sum-1 invariant
-on the full transcript is not relevant. Pass the **full per-transcript
-BED** to `-x` if you want the original sum-1 normalisation to be the
-basis for `per_transcript_sum1`.
+the within-transcript z-scoring operates on those slices only — which
+is usually what you want. Pass the **full per-transcript BED** to `-x`
+if you want the per-transcript baseline computed from the whole
+transcript rather than from the slice.
 
 **Which mode actually changes the ROC/AUC?** Because the per-position
 AUC is rank-based, only changes that affect the **ordering of `s_i`
@@ -737,22 +734,17 @@ across exons** matter:
   transcripts get their bias removed). Reduces the effect of an
   exon being in a generally-high-signal transcript; sharpens
   position-specific contributions.
-- `raw` → `per_transcript_sum1`: rescales within-transcript scores
-  so that a "10x stronger transcript" is no longer 10x more
-  influential per row. Useful when relative *within-transcript*
-  binding pattern is what you want to score, independent of total
-  binding strength.
 - Modes never change `ignore`'s row count of 0 (no overlap = 0
   score in every mode), so positions with no overlap give AUC =
   0.5 (all-tied) regardless of `--xl_score`.
 
-If BED column 4 is `.` (placeholder) for every row, the
-per-transcript modes treat each overlap row as its own
-singleton-transcript, which means **they collapse to `raw`**.
+If BED column 4 is `.` (placeholder) for every row,
+`per_transcript_zscore` treats each overlap row as its own
+singleton-transcript, which means **it collapses to `raw`**.
 That's the right behaviour, but it also means a BED without a
 meaningful `name` column gives you no benefit from the
-per-transcript modes — make sure column 4 carries your transcript
-ID before you reach for them.
+per-transcript mode — make sure column 4 carries your transcript
+ID before you reach for it.
 
 The pipeline auto-detects non-trivial values in BED column 5 and
 logs a `WARN` if you've left `--xl_score` at the default
@@ -764,7 +756,7 @@ re-checking your BED.
 ```
 rnamaps -i ... -x ... -f ... -fi ... \
   --enrichment roc_auc \
-  --xl_score ignore raw per_transcript_sum1 per_transcript_zscore \
+  --xl_score ignore raw per_transcript_zscore \
   --roc_aggregator both --roc_n_perm 1000 -p AI
 ```
 

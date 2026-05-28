@@ -3,9 +3,11 @@
 import logging
 import os
 import sys
+import traceback
 
 import numpy as np
 import pandas as pd
+import pybedtools as pbt
 
 from rnamaps.coverage import detect_nontrivial_bed_scores, get_coverage_plot
 from rnamaps.enrichment import EnrichmentResult
@@ -443,7 +445,7 @@ def run_rna_map(args):
                     "BED column 5 of %s contains non-trivial scores. "
                     "--xl_score includes 'ignore', which treats them as "
                     "presence indicators only. Add (or switch to) --xl_score "
-                    "raw / per_transcript_zscore / per_transcript_sum1 "
+                    "raw / per_transcript_zscore "
                     "to use the score values.",
                     xl_bed,
                 )
@@ -490,141 +492,166 @@ def run_rna_map(args):
                 )
                 logging.info("=" * 60)
 
-                if score_mode == 'ignore':
-                    # Reuse the presence-only matrices already built for
-                    # the heatmap so we don't pay bedtools twice.
-                    region_covs_mode = list(heatmap_region_covs)
-                    fisher_linegraphs_mode = []
-                    for rc_ in region_covs_mode:
-                        # Re-run the fast Fisher-linegraph builder from
-                        # the matrix (no bedtools needed).
-                        from rnamaps.coverage import (
-                            _fisher_linegraph_from_matrix,
-                        )
-                        fisher_linegraphs_mode.append(
-                            _fisher_linegraph_from_matrix(rc_, smoothing)
-                        )
-                else:
-                    region_covs_mode = []
-                    fisher_linegraphs_mode = []
-                    region_specs = [
-                        ('upstream_5ss', upstream_5ss_bed),
-                        ('middle_3ss', middle_3ss_bed),
-                        ('middle_5ss', middle_5ss_bed),
-                        ('downstream_3ss', downstream_3ss_bed),
-                    ]
-                    if args.all_sites:
-                        region_specs.extend([
-                            ('downstream_5ss', downstream_5ss_bed),
-                            ('upstream_3ss', upstream_3ss_bed),
-                        ])
-                    for region_label_, region_bed_ in region_specs:
-                        lg_, rc_ = get_coverage_plot(
-                            xl_bed, region_bed_, fai, window,
-                            exon_categories, region_label_, smoothing,
-                            score_mode=score_mode,
-                        )
-                        fisher_linegraphs_mode.append(lg_)
-                        region_covs_mode.append(rc_)
+                try:
+                    if score_mode == 'ignore':
+                        # Reuse the presence-only matrices already built
+                        # for the heatmap so we don't pay bedtools twice.
+                        region_covs_mode = list(heatmap_region_covs)
+                        fisher_linegraphs_mode = []
+                        for rc_ in region_covs_mode:
+                            # Re-run the fast Fisher-linegraph builder
+                            # from the matrix (no bedtools needed).
+                            from rnamaps.coverage import (
+                                _fisher_linegraph_from_matrix,
+                            )
+                            fisher_linegraphs_mode.append(
+                                _fisher_linegraph_from_matrix(rc_, smoothing)
+                            )
+                    else:
+                        region_covs_mode = []
+                        fisher_linegraphs_mode = []
+                        region_specs = [
+                            ('upstream_5ss', upstream_5ss_bed),
+                            ('middle_3ss', middle_3ss_bed),
+                            ('middle_5ss', middle_5ss_bed),
+                            ('downstream_3ss', downstream_3ss_bed),
+                        ]
+                        if args.all_sites:
+                            region_specs.extend([
+                                ('downstream_5ss', downstream_5ss_bed),
+                                ('upstream_3ss', upstream_3ss_bed),
+                            ])
+                        for region_label_, region_bed_ in region_specs:
+                            lg_, rc_ = get_coverage_plot(
+                                xl_bed, region_bed_, fai, window,
+                                exon_categories, region_label_, smoothing,
+                                score_mode=score_mode,
+                            )
+                            fisher_linegraphs_mode.append(lg_)
+                            region_covs_mode.append(rc_)
 
-                # method -> list of EnrichmentResult per region (in order)
-                results_by_method = {m: [] for m in enrichment_methods}
-                for region_cov, fisher_lg in zip(
-                    region_covs_mode, fisher_linegraphs_mode
-                ):
-                    if region_cov.n_exons == 0:
-                        continue
-                    region_label = region_cov.label
+                    # method -> list of EnrichmentResult per region.
+                    results_by_method = {m: [] for m in enrichment_methods}
+                    for region_cov, fisher_lg in zip(
+                        region_covs_mode, fisher_linegraphs_mode
+                    ):
+                        if region_cov.n_exons == 0:
+                            continue
+                        region_label = region_cov.label
+                        for method in enrichment_methods:
+                            res = _run_method(
+                                method, region_cov, fisher_lg,
+                                exon_categories, region_label, args, rng,
+                                smoothing,
+                            )
+                            if res is not None:
+                                results_by_method[method].append(res)
+
                     for method in enrichment_methods:
-                        res = _run_method(
-                            method, region_cov, fisher_lg,
-                            exon_categories, region_label, args, rng,
-                            smoothing,
-                        )
-                        if res is not None:
-                            results_by_method[method].append(res)
+                        method_results = results_by_method[method]
+                        if not method_results:
+                            logging.warning(
+                                f"[{method}/{score_mode}] No results to plot."
+                            )
+                            continue
 
-                for method in enrichment_methods:
-                    method_results = results_by_method[method]
-                    if not method_results:
+                        method_plot_df = pd.concat(
+                            [r.plot_df for r in method_results],
+                            ignore_index=True,
+                        )
+                        cluster_frames = [
+                            r.clusters_df for r in method_results
+                            if r.clusters_df is not None
+                            and not r.clusters_df.empty
+                        ]
+                        method_clusters_df = (
+                            pd.concat(cluster_frames, ignore_index=True)
+                            if cluster_frames else pd.DataFrame()
+                        )
+
+                        roc_curves_df = None
+                        region_auc_df = None
+                        if any(getattr(r, 'extras', None)
+                               for r in method_results):
+                            roc_frames = [
+                                r.extras.get('roc_curves_df')
+                                for r in method_results
+                                if r.extras
+                                and r.extras.get('roc_curves_df') is not None
+                                and not r.extras['roc_curves_df'].empty
+                            ]
+                            if roc_frames:
+                                roc_curves_df = pd.concat(
+                                    roc_frames, ignore_index=True
+                                )
+                            auc_frames = [
+                                r.extras.get('region_auc_df')
+                                for r in method_results
+                                if r.extras
+                                and r.extras.get('region_auc_df') is not None
+                                and not r.extras['region_auc_df'].empty
+                            ]
+                            if auc_frames:
+                                region_auc_df = pd.concat(
+                                    auc_frames, ignore_index=True
+                                )
+
+                        method_plot_df.to_csv(
+                            f'{output_dir}/{FILEname}_RNAmap_{method}'
+                            f'{file_suffix}.tsv',
+                            sep="\t", index=False,
+                        )
+                        if not method_clusters_df.empty:
+                            method_clusters_df.to_csv(
+                                f'{output_dir}/{FILEname}_RNAmap_{method}'
+                                f'{file_suffix}_clusters.tsv',
+                                sep="\t", index=False,
+                            )
+                        if roc_curves_df is not None and not roc_curves_df.empty:
+                            roc_curves_df.to_csv(
+                                f'{output_dir}/{FILEname}_RNAmap_{method}'
+                                f'{file_suffix}_roc_curves.tsv',
+                                sep="\t", index=False,
+                            )
+                        if region_auc_df is not None and not region_auc_df.empty:
+                            region_auc_df.to_csv(
+                                f'{output_dir}/{FILEname}_RNAmap_{method}'
+                                f'{file_suffix}_region_auc.tsv',
+                                sep="\t", index=False,
+                            )
+
+                        _plot_method(
+                            method, method_plot_df, method_clusters_df,
+                            exon_categories, original_counts,
+                            window, args, output_dir, FILEname,
+                            roc_curves_df=roc_curves_df,
+                            region_auc_df=region_auc_df,
+                            xl_score_mode=(score_mode if multi_mode else None),
+                        )
+                except Exception:
+                    # Log full traceback to the .log file so future
+                    # silent crashes show up here instead of only on
+                    # stderr. Skip to the next mode rather than killing
+                    # the whole sweep.
+                    logging.error(
+                        "Unhandled exception while processing "
+                        f"--xl_score {score_mode}; skipping this mode. "
+                        "Traceback:\n%s",
+                        traceback.format_exc(),
+                    )
+                finally:
+                    # Release pybedtools temp files between modes so
+                    # /tmp doesn't fill up across a multi-mode sweep
+                    # (each bedtools intersect can write a multi-GB
+                    # temp file that otherwise lives until process
+                    # exit).
+                    try:
+                        pbt.cleanup(remove_all=False)
+                    except Exception:
                         logging.warning(
-                            f"[{method}/{score_mode}] No results to plot."
+                            "pybedtools.cleanup() raised; continuing.",
+                            exc_info=True,
                         )
-                        continue
-
-                    method_plot_df = pd.concat(
-                        [r.plot_df for r in method_results],
-                        ignore_index=True,
-                    )
-                    cluster_frames = [
-                        r.clusters_df for r in method_results
-                        if r.clusters_df is not None
-                        and not r.clusters_df.empty
-                    ]
-                    method_clusters_df = (
-                        pd.concat(cluster_frames, ignore_index=True)
-                        if cluster_frames else pd.DataFrame()
-                    )
-
-                    roc_curves_df = None
-                    region_auc_df = None
-                    if any(getattr(r, 'extras', None)
-                           for r in method_results):
-                        roc_frames = [
-                            r.extras.get('roc_curves_df')
-                            for r in method_results
-                            if r.extras
-                            and r.extras.get('roc_curves_df') is not None
-                            and not r.extras['roc_curves_df'].empty
-                        ]
-                        if roc_frames:
-                            roc_curves_df = pd.concat(
-                                roc_frames, ignore_index=True
-                            )
-                        auc_frames = [
-                            r.extras.get('region_auc_df')
-                            for r in method_results
-                            if r.extras
-                            and r.extras.get('region_auc_df') is not None
-                            and not r.extras['region_auc_df'].empty
-                        ]
-                        if auc_frames:
-                            region_auc_df = pd.concat(
-                                auc_frames, ignore_index=True
-                            )
-
-                    method_plot_df.to_csv(
-                        f'{output_dir}/{FILEname}_RNAmap_{method}'
-                        f'{file_suffix}.tsv',
-                        sep="\t", index=False,
-                    )
-                    if not method_clusters_df.empty:
-                        method_clusters_df.to_csv(
-                            f'{output_dir}/{FILEname}_RNAmap_{method}'
-                            f'{file_suffix}_clusters.tsv',
-                            sep="\t", index=False,
-                        )
-                    if roc_curves_df is not None and not roc_curves_df.empty:
-                        roc_curves_df.to_csv(
-                            f'{output_dir}/{FILEname}_RNAmap_{method}'
-                            f'{file_suffix}_roc_curves.tsv',
-                            sep="\t", index=False,
-                        )
-                    if region_auc_df is not None and not region_auc_df.empty:
-                        region_auc_df.to_csv(
-                            f'{output_dir}/{FILEname}_RNAmap_{method}'
-                            f'{file_suffix}_region_auc.tsv',
-                            sep="\t", index=False,
-                        )
-
-                    _plot_method(
-                        method, method_plot_df, method_clusters_df,
-                        exon_categories, original_counts,
-                        window, args, output_dir, FILEname,
-                        roc_curves_df=roc_curves_df,
-                        region_auc_df=region_auc_df,
-                        xl_score_mode=(score_mode if multi_mode else None),
-                    )
 
         # ==============================================================
         # MULTIVALENCY (optional, requires germs.R)
@@ -647,6 +674,17 @@ def run_rna_map(args):
         logging.info("SCRIPT COMPLETED SUCCESSFULLY")
         logging.info("=" * 60)
 
+    except Exception:
+        # Mirror the traceback into the .log file before re-raising so
+        # that crashes are not silent in the per-run log (previously
+        # the .log only captured logging.* calls and the traceback
+        # went to stderr, leaving no record on disk if stderr was lost).
+        logging.error(
+            "Unhandled exception in run_rna_map; aborting. "
+            "Traceback:\n%s",
+            traceback.format_exc(),
+        )
+        raise
     finally:
         log_runtime(start_time, logger)
         for handler in logger.handlers:
