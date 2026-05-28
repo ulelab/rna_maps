@@ -42,7 +42,7 @@ def cli():
     optional.add_argument(
         '--enrichment', type=str, nargs='+', default=None,
         choices=['permutation_z', 'fisher', 'bootstrap_contrast',
-                 'cluster_perm', 'roc_auc'],
+                 'cluster_perm', 'roc_auc', 'bin_tpr'],
         help="One or more enrichment methods to run. "
              "[DEFAULT: bootstrap_contrast]. Honours legacy --no-permute "
              "as 'fisher' when --enrichment is not given.")
@@ -240,6 +240,20 @@ def cli():
         '--pseudocount_frac', type=float, default=0.01,
         help='Only used with --shrinkage pseudocount. Adaptive log2FC '
              'pseudocount fraction [DEFAULT: 0.01]')
+
+    # BIN-TPR OPTIONS
+    bt_group = parser.add_argument_group(
+        'Per-bin TPR/FPR table (--enrichment bin_tpr)')
+    bt_group.add_argument(
+        '--bin_tpr_size', type=int, default=50,
+        help="Bin width (nt) for the per-bin TPR/FPR table. The "
+             "middle_3ss / middle_5ss windows are tiled into "
+             "non-overlapping bins of this size; for each bin we "
+             "report the fraction of regulated and control exons "
+             "with any CLIP signal in the bin, plus Fisher's exact "
+             "p-value and a BH q-value within each "
+             "(region, category) family. Other splice-site regions "
+             "are skipped. [DEFAULT: 50]")
 
     # CLUSTER-PERMUTATION OPTIONS
     cl_group = parser.add_argument_group(

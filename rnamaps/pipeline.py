@@ -11,6 +11,7 @@ import pybedtools as pbt
 
 from rnamaps.coverage import detect_nontrivial_bed_scores, get_coverage_plot
 from rnamaps.enrichment import EnrichmentResult
+from rnamaps.enrichment import bin_tpr as enrich_bin_tpr
 from rnamaps.enrichment import bootstrap_contrast as enrich_bootstrap
 from rnamaps.enrichment import cluster_perm as enrich_cluster
 from rnamaps.enrichment import roc_auc as enrich_roc_auc
@@ -78,6 +79,11 @@ def _run_method(method, region_cov, region_fisher_linegraph,
             n_perm=getattr(args, 'roc_n_perm', 0),
             smoothing=smoothing,
             binarise=False,
+        )
+    if method == 'bin_tpr':
+        return enrich_bin_tpr.compute(
+            region_cov, exon_categories, region_label,
+            bin_size=getattr(args, 'bin_tpr_size', 50),
         )
     if method == 'permutation_z':
         plot_df, clusters_df = compute_permutation_pvalues(
@@ -176,6 +182,9 @@ def _plot_method(method, plot_df, clusters_df, exon_categories,
             pvalue_method='fisher', plot_kind='line',
             method_name=f'fisher{suffix}',
         )
+        return
+    if method == 'bin_tpr':
+        # Tabular-only output; the TSV is written by the caller.
         return
     if method == 'roc_auc':
         score_mode = xl_score_mode or 'ignore'
