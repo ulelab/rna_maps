@@ -103,6 +103,34 @@ class RegionCoverage:
         mask = np.isin(self.exon_names, list(categories))
         return self.matrix[mask], self.exon_names[mask]
 
+    def save_npz(self, path: str) -> None:
+        """Persist this RegionCoverage to ``path`` as a compressed .npz.
+
+        Layout: ``matrix`` (n_exons × n_positions, raw integer counts before
+        binarisation/smoothing), ``exon_ids``, ``exon_names``, ``positions``,
+        ``label`` (0-d string array). Round-trippable via :meth:`load_npz`.
+        """
+        np.savez_compressed(
+            path,
+            matrix=self.matrix,
+            exon_ids=np.asarray(self.exon_ids, dtype=str),
+            exon_names=np.asarray(self.exon_names, dtype=str),
+            positions=self.positions,
+            label=np.array(self.label),
+        )
+
+    @classmethod
+    def load_npz(cls, path: str) -> "RegionCoverage":
+        """Inverse of :meth:`save_npz`."""
+        with np.load(path, allow_pickle=False) as data:
+            return cls(
+                label=str(data['label']),
+                matrix=data['matrix'],
+                exon_ids=data['exon_ids'],
+                exon_names=data['exon_names'],
+                positions=data['positions'],
+            )
+
 
 def _ss_df_to_pbt(ss_df: pd.DataFrame, window: int, fai: str):
     """Build a sorted, windowed pybedtools BedTool from a splice-site frame.

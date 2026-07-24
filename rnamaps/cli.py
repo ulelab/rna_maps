@@ -111,6 +111,12 @@ def cli():
         '-ao', '--all_sites', action='store_true',
         help='Include all 6 splice sites (default: 4 core sites)')
     optional.add_argument(
+        '--dump_region_matrix', action='store_true',
+        help='Save the per-exon × per-position presence-only coverage '
+             'matrix (the one the heatmap is built from) for each splice-site '
+             'region as a .npz next to the other outputs. Enables joint '
+             'cross-source heatmaps that need the raw per-exon matrix.')
+    optional.add_argument(
         '-p', '--prefix', type=str,
         help='Prefix for output files')
     optional.add_argument(

@@ -484,6 +484,17 @@ def run_rna_map(args):
                     region_label_, smoothing, score_mode='ignore',
                 )
                 heatmap_region_covs.append(rc_)
+            if getattr(args, 'dump_region_matrix', False):
+                for rc_ in heatmap_region_covs:
+                    npz_path = (
+                        f"{output_dir}/{FILEname}_{rc_.label}"
+                        f"_region_matrix.npz"
+                    )
+                    rc_.save_npz(npz_path)
+                    logging.info(
+                        f"Dumped region matrix {rc_.label} "
+                        f"({rc_.n_exons}×{rc_.n_positions}) to {npz_path}"
+                    )
             plot_heatmap(heatmap_region_covs, exon_categories, window,
                          args.all_sites, output_dir, FILEname)
 
@@ -538,6 +549,19 @@ def run_rna_map(args):
                             )
                             fisher_linegraphs_mode.append(lg_)
                             region_covs_mode.append(rc_)
+                        if getattr(args, 'dump_region_matrix', False):
+                            for rc_ in region_covs_mode:
+                                npz_path = (
+                                    f"{output_dir}/{FILEname}_{rc_.label}"
+                                    f"_xlscore-{score_mode}_region_matrix.npz"
+                                )
+                                rc_.save_npz(npz_path)
+                                logging.info(
+                                    f"Dumped region matrix "
+                                    f"{rc_.label}/{score_mode} "
+                                    f"({rc_.n_exons}×{rc_.n_positions}) "
+                                    f"to {npz_path}"
+                                )
 
                     # method -> list of EnrichmentResult per region.
                     results_by_method = {m: [] for m in enrichment_methods}
