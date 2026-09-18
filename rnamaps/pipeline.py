@@ -26,6 +26,7 @@ from rnamaps.logging_utils import log_runtime, setup_logging
 from rnamaps.multivalency import plot_multivalency
 from rnamaps.permutation import compute_permutation_pvalues
 from rnamaps.plots import (
+    heatmap_row_order,
     plot_exon_lengths,
     plot_heatmap,
     plot_rna_map,
@@ -484,16 +485,36 @@ def run_rna_map(args):
                     region_label_, smoothing, score_mode='ignore',
                 )
                 heatmap_region_covs.append(rc_)
+            heatmap_order = None
             if getattr(args, 'dump_region_matrix', False):
-                for rc_ in heatmap_region_covs:
-                    npz_path = (
-                        f"{output_dir}/{FILEname}_{rc_.label}"
-                        f"_region_matrix.npz"
+                # Row ranking shared with the heatmap PDF so the dumped TSVs
+                # list exons in the same top-to-bottom order.
+                ranking = heatmap_row_order(heatmap_region_covs,
+                                            args.all_sites)
+                if ranking is not None:
+                    sorted_idx_, total_signal_, _ = ranking
+                    rc0_ = heatmap_region_covs[0]
+                    heatmap_order = pd.DataFrame({
+                        'category': np.asarray(rc0_.exon_names, dtype=str),
+                        'exon_id': np.asarray(rc0_.exon_ids, dtype=str),
+                        'heatmap_signal': total_signal_.round(3),
+                    })
+                    heatmap_order['heatmap_row'] = pd.array(
+                        [pd.NA] * len(heatmap_order), dtype='Int64'
                     )
-                    rc_.save_npz(npz_path)
+                    heatmap_order.loc[sorted_idx_, 'heatmap_row'] = (
+                        np.arange(1, sorted_idx_.size + 1)
+                    )
+                for rc_ in heatmap_region_covs:
+                    dump_base = (
+                        f"{output_dir}/{FILEname}_{rc_.label}_region_matrix"
+                    )
+                    rc_.save_npz(f"{dump_base}.npz")
+                    rc_.save_tsv(f"{dump_base}.tsv", heatmap_order)
                     logging.info(
                         f"Dumped region matrix {rc_.label} "
-                        f"({rc_.n_exons}×{rc_.n_positions}) to {npz_path}"
+                        f"({rc_.n_exons}×{rc_.n_positions}) to "
+                        f"{dump_base}.npz/.tsv"
                     )
             plot_heatmap(heatmap_region_covs, exon_categories, window,
                          args.all_sites, output_dir, FILEname)
@@ -551,16 +572,17 @@ def run_rna_map(args):
                             region_covs_mode.append(rc_)
                         if getattr(args, 'dump_region_matrix', False):
                             for rc_ in region_covs_mode:
-                                npz_path = (
+                                dump_base = (
                                     f"{output_dir}/{FILEname}_{rc_.label}"
-                                    f"_xlscore-{score_mode}_region_matrix.npz"
+                                    f"_xlscore-{score_mode}_region_matrix"
                                 )
-                                rc_.save_npz(npz_path)
+                                rc_.save_npz(f"{dump_base}.npz")
+                                rc_.save_tsv(f"{dump_base}.tsv", heatmap_order)
                                 logging.info(
                                     f"Dumped region matrix "
                                     f"{rc_.label}/{score_mode} "
                                     f"({rc_.n_exons}×{rc_.n_positions}) "
-                                    f"to {npz_path}"
+                                    f"to {dump_base}.npz/.tsv"
                                 )
 
                     # method -> list of EnrichmentResult per region.
@@ -700,7 +722,10 @@ def run_rna_map(args):
                 downstream_5ss_bed, upstream_3ss_bed,
                 args.fastaindex, args.window, args.genomefasta,
                 output_dir, FILEname, args.germsdir,
-                args.all_sites, exon_categories, original_counts
+                args.all_sites, exon_categories, original_counts,
+                mv_window=getattr(args, 'mv_window', 100),
+                mv_smoothing=getattr(args, 'mv_smoothing', 20),
+                mv_kmer=getattr(args, 'mv_kmer', 5),
             )
 
         logging.info("\n" + "=" * 60)

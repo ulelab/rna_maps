@@ -119,6 +119,55 @@ class RegionCoverage:
             label=np.array(self.label),
         )
 
+    def save_tsv(self, path: str,
+                 heatmap_order: Optional[pd.DataFrame] = None) -> None:
+        """Write this RegionCoverage to ``path`` as a human-readable TSV.
+
+        One row per exon. Leading columns give the exon's genomic location
+        (parsed from ``exon_ids`` of the form ``chr:start-end;strand``, with
+        ``start`` 0-based) plus a ``locus`` column (``chr:start+1-end``,
+        1-based) that can be pasted straight into IGV / the UCSC browser.
+        Remaining columns are raw crosslink counts at each position, named
+        by nt offset from the splice site (``-window`` .. ``+window``).
+
+        If ``heatmap_order`` is given (columns ``category``, ``exon_id``,
+        ``heatmap_row``, ``heatmap_signal``, as built from
+        :func:`rnamaps.plots.heatmap_row_order`), those columns are added
+        and rows are sorted top-to-bottom as in the heatmap PDF; exons not
+        shown in the heatmap (no signal) follow with an empty
+        ``heatmap_row``.
+        """
+        ids = pd.Series(np.asarray(self.exon_ids, dtype=str))
+        coords = ids.str.extract(
+            r'^(?P<chr>[^:]+):(?P<start_0based>\d+)-(?P<end>\d+);(?P<strand>.+)$'
+        )
+        out = pd.DataFrame({
+            'exon_id': ids,
+            'category': np.asarray(self.exon_names, dtype=str),
+        })
+        out = pd.concat([out, coords], axis=1)
+        out['locus'] = (
+            out['chr'] + ':'
+            + (pd.to_numeric(out['start_0based']) + 1).astype('Int64').astype(str)
+            + '-' + out['end']
+        ).where(coords['chr'].notna())
+        out['total_crosslinks'] = self.matrix.sum(axis=1)
+        out['n_positions_with_signal'] = (self.matrix > 0).sum(axis=1)
+
+        window = (self.n_positions - 1) // 2
+        offsets = np.asarray(self.positions) - (window + 1)
+        counts = pd.DataFrame(self.matrix, columns=[str(o) for o in offsets])
+        out = pd.concat([out, counts], axis=1)
+
+        if heatmap_order is not None:
+            out = out.merge(heatmap_order, on=['category', 'exon_id'],
+                            how='left', validate='one_to_one')
+            out = out.sort_values(['heatmap_row', 'category', 'exon_id'],
+                                  na_position='last', kind='stable')
+            lead = ['heatmap_row', 'heatmap_signal']
+            out = out[lead + [c for c in out.columns if c not in lead]]
+        out.to_csv(path, sep='\t', index=False)
+
     @classmethod
     def load_npz(cls, path: str) -> "RegionCoverage":
         """Inverse of :meth:`save_npz`."""

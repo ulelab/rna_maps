@@ -93,6 +93,64 @@ def _smooth_rows_gaussian(matrix, window_size=10, std=2):
     return sm.T
 
 
+def _heatmap_labels(all_sites):
+    if not all_sites:
+        return ['upstream_5ss', 'middle_3ss', 'middle_5ss', 'downstream_3ss']
+    return ['upstream_3ss', 'upstream_5ss', 'middle_3ss', 'middle_5ss',
+            'downstream_3ss', 'downstream_5ss']
+
+
+def heatmap_row_order(region_covs, all_sites):
+    """Rank exons exactly as the per-exon heatmap displays them.
+
+    Each region's matrix is binarised and Gaussian-smoothed; the per-exon
+    "total signal" is the sum over all heatmap regions. Exons with no
+    signal are dropped, and the rest are sorted by category, then by
+    descending total signal within each category.
+
+    Returns
+    -------
+    None if there is nothing to rank, otherwise a tuple
+    ``(sorted_idx, total_signal, smoothed_by_label)`` where ``sorted_idx``
+    are row indices into ``region_covs[0]`` in top-to-bottom heatmap order
+    and ``total_signal`` is the ranking score for every exon row.
+    """
+    cov_by_label = {rc.label: rc for rc in region_covs}
+    if not cov_by_label:
+        return None
+
+    # All regions are built from the same parent exon frame so exon_ids
+    # align row-wise across regions; use the first to learn identity.
+    exon_names = region_covs[0].exon_names
+    n_exons = exon_names.size
+    if n_exons == 0:
+        return None
+
+    # Binarised + smoothed matrices keyed by label, plus a global per-exon
+    # "total signal" used to rank rows. All operations stay in numpy so we
+    # never materialise the (n_exons × n_positions × n_regions) long-form
+    # DataFrame the old path needed.
+    total_signal = np.zeros(n_exons, dtype=np.float64)
+    smoothed_by_label = {}
+    for label in _heatmap_labels(all_sites):
+        if label not in cov_by_label:
+            continue
+        bin_mat = (cov_by_label[label].matrix > 0).astype(
+            np.float32, copy=False
+        )
+        sm = _smooth_rows_gaussian(bin_mat, window_size=10, std=2)
+        smoothed_by_label[label] = sm
+        total_signal += sm.sum(axis=1)
+
+    keep_idx = np.flatnonzero(total_signal > 0)
+    if keep_idx.size == 0:
+        return None
+
+    # Sort by category, then descending total signal within each category.
+    order = np.lexsort((-total_signal[keep_idx], exon_names[keep_idx]))
+    return keep_idx[order], total_signal, smoothed_by_label
+
+
 def plot_heatmap(region_covs, exon_categories, window, all_sites,
                  output_dir, FILEname):
     """Generate per-exon heatmap from per-region coverage matrices.
@@ -135,56 +193,19 @@ def plot_heatmap(region_covs, exon_categories, window, all_sites,
         f'{output_dir}/{FILEname}_totalExonsCovered.tsv', sep="\t", index=False
     )
 
-    if not all_sites:
-        labels = ['upstream_5ss', 'middle_3ss', 'middle_5ss', 'downstream_3ss']
-    else:
-        labels = ['upstream_3ss', 'upstream_5ss', 'middle_3ss', 'middle_5ss',
-                  'downstream_3ss', 'downstream_5ss']
-
-    # Build binarised + smoothed matrices keyed by label, plus a global
-    # per-exon "total signal" used to rank rows. All operations stay in
-    # numpy so we never materialise the (n_exons × n_positions × n_regions)
-    # long-form DataFrame the old path needed.
+    labels = _heatmap_labels(all_sites)
     cov_by_label = {rc.label: rc for rc in region_covs}
     if not cov_by_label:
         logging.info("No regions for heatmap — skipping")
         return
 
-    # Use the first available region to learn the global exon order /
-    # identity. All regions are built from the same parent exon frame so
-    # exon_ids align row-wise across regions.
-    any_rc = region_covs[0]
-    exon_ids = any_rc.exon_ids
-    exon_names = any_rc.exon_names
-    n_exons = exon_ids.size
-    if n_exons == 0:
+    ranking = heatmap_row_order(region_covs, all_sites)
+    if ranking is None:
         logging.info("No exons with signal for heatmap — skipping")
         return
-
-    total_signal = np.zeros(n_exons, dtype=np.float64)
-    smoothed_by_label = {}
-    for label in labels:
-        if label not in cov_by_label:
-            continue
-        rc = cov_by_label[label]
-        bin_mat = (rc.matrix > 0).astype(np.float32, copy=False)
-        sm = _smooth_rows_gaussian(bin_mat, window_size=10, std=2)
-        smoothed_by_label[label] = sm
-        total_signal += sm.sum(axis=1)
-
-    keep = total_signal > 0
-    if not keep.any():
-        logging.info("No exons with signal for heatmap — skipping")
-        return
-
-    keep_idx = np.flatnonzero(keep)
-    kept_names = exon_names[keep_idx]
-    kept_totals = total_signal[keep_idx]
-
-    # Sort by category, then descending total signal within each category.
-    order = np.lexsort((-kept_totals, kept_names))
-    sorted_idx = keep_idx[order]
-    sorted_exon_ids = exon_ids[sorted_idx].tolist()
+    sorted_idx, _, smoothed_by_label = ranking
+    exon_names = region_covs[0].exon_names
+    sorted_exon_ids = region_covs[0].exon_ids[sorted_idx].tolist()
 
     # Set up figure
     width = max(15, len(labels) * 4)
@@ -199,7 +220,7 @@ def plot_heatmap(region_covs, exon_categories, window, all_sites,
     ax_names = fig.add_subplot(gs[0, 0])
     ax_names.patch.set_alpha(0.0)
 
-    names = kept_names[order]
+    names = exon_names[sorted_idx]
     unique_names = sorted(set(names))
     color_palette = plt.cm.tab10.colors[:len(unique_names)]
     name_colors = {n: color_palette[i] for i, n in enumerate(unique_names)}

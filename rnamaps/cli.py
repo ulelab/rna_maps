@@ -114,8 +114,11 @@ def cli():
         '--dump_region_matrix', action='store_true',
         help='Save the per-exon × per-position presence-only coverage '
              'matrix (the one the heatmap is built from) for each splice-site '
-             'region as a .npz next to the other outputs. Enables joint '
-             'cross-source heatmaps that need the raw per-exon matrix.')
+             'region as a .npz and a .tsv next to the other outputs. The TSV '
+             'has one row per exon with its genomic coordinates (and a '
+             'browser-ready locus) followed by per-position crosslink counts. '
+             'Enables joint cross-source heatmaps that need the raw per-exon '
+             'matrix.')
     optional.add_argument(
         '-p', '--prefix', type=str,
         help='Prefix for output files')
@@ -334,6 +337,18 @@ def cli():
     mv_group.add_argument(
         '-g', '--germsdir', type=str, default=os.getcwd(), nargs='?',
         help='Directory containing germs.R [DEFAULT: current directory]')
+    mv_group.add_argument(
+        '--mv_window', type=int, default=100,
+        help='germs multivalency scoring window in nt (bumped to the next odd '
+             'number by germs). Controls the scale of multivalency detected; '
+             'independent of --window. [DEFAULT: 100]')
+    mv_group.add_argument(
+        '--mv_smoothing', type=int, default=20,
+        help='germs multivalency smoothing window in nt (bumped to odd). '
+             'Independent of --smoothing. [DEFAULT: 20]')
+    mv_group.add_argument(
+        '--mv_kmer', type=int, default=5,
+        help='germs k-mer length for multivalency. [DEFAULT: 5]')
 
     args = parser.parse_args()
 
