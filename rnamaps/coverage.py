@@ -145,6 +145,14 @@ class RegionCoverage:
             'exon_id': ids,
             'category': np.asarray(self.exon_names, dtype=str),
         })
+        # ``exon_id`` is coordinate-derived, so separate splicing events can
+        # legitimately share both it and their category. Keep those event rows
+        # distinct with a stable occurrence index instead of treating the
+        # coordinate as a globally unique event identifier.
+        join_columns = ['category', 'exon_id']
+        out['event_occurrence'] = (
+            out.groupby(join_columns, sort=False, dropna=False).cumcount() + 1
+        )
         out = pd.concat([out, coords], axis=1)
         out['locus'] = (
             out['chr'] + ':'
@@ -160,7 +168,14 @@ class RegionCoverage:
         out = pd.concat([out, counts], axis=1)
 
         if heatmap_order is not None:
-            out = out.merge(heatmap_order, on=['category', 'exon_id'],
+            heatmap_order = heatmap_order.copy()
+            heatmap_order['event_occurrence'] = (
+                heatmap_order.groupby(
+                    join_columns, sort=False, dropna=False
+                ).cumcount() + 1
+            )
+            out = out.merge(heatmap_order,
+                            on=join_columns + ['event_occurrence'],
                             how='left', validate='one_to_one')
             out = out.sort_values(['heatmap_row', 'category', 'exon_id'],
                                   na_position='last', kind='stable')
@@ -185,16 +200,22 @@ def _ss_df_to_pbt(ss_df: pd.DataFrame, window: int, fai: str):
     """Build a sorted, windowed pybedtools BedTool from a splice-site frame.
 
     The input ``ss_df`` is expected to have BED6 columns
-    (``chr, start, end, name, score, strand``); ``name`` carries the
-    ``category_exon-id`` string built by :func:`get_ss_bed`. Rows with
-    missing or placeholder names are dropped.
+    (``chr, start, end, name, score, strand``). Rows with missing or
+    placeholder names are dropped. The returned DataFrame retains the
+    human-readable ``category_exon-id`` name built by :func:`get_ss_bed`,
+    while the BED passed to bedtools uses a unique, stable row identifier.
+    This distinction is important because separate splicing events can share
+    an exon coordinate and therefore the same human-readable name.
     """
     ss_df = ss_df.loc[
         ss_df['name'].notna() & (ss_df['name'].astype(str) != ".")
-    ].copy()
+    ].copy().reset_index(drop=True)
     ss_df['name'] = ss_df['name'].astype(str)
+    ss_df['_coverage_row_id'] = np.arange(len(ss_df)).astype(str)
+    bed_df = ss_df[['chr', 'start', 'end', 'name', 'score', 'strand']].copy()
+    bed_df['name'] = ss_df['_coverage_row_id']
     bed = pbt.BedTool.from_dataframe(
-        ss_df[['chr', 'start', 'end', 'name', 'score', 'strand']]
+        bed_df
     ).sort().slop(l=window, r=window, s=True, g=fai)
     return ss_df, bed
 
@@ -636,7 +657,10 @@ def get_coverage_plot(
     ss_df, ss_pbt = _ss_df_to_pbt(df, window, fai)
 
     exon_names_full = ss_df['name'].to_numpy(dtype=object)
-    name_to_row = {n: i for i, n in enumerate(exon_names_full)}
+    name_to_row = {
+        row_id: i
+        for i, row_id in enumerate(ss_df['_coverage_row_id'].astype(str))
+    }
     n_exons = exon_names_full.size
     n_pos = 2 * window + 1
 
