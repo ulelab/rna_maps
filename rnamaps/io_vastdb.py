@@ -90,30 +90,57 @@ def load_vastdb_data(enhanced_file, silenced_file, control_file,
     control_ids = read_id_list(control_file, 'control')
     constitutive_ids = read_id_list(constitutive_file, 'constitutive')
 
-    all_ids = enhanced_ids + silenced_ids + control_ids + constitutive_ids
-    logging.info(f"Total EVENT IDs (with duplicates): {len(all_ids)}")
+    ids_by_category = {
+        'enhanced': enhanced_ids,
+        'silenced': silenced_ids,
+        'control': control_ids,
+        'constitutive': constitutive_ids,
+    }
+    invalid_ids = [
+        (category, event)
+        for category, ids in ids_by_category.items()
+        for event in ids
+        if re.fullmatch(r'HsaEX\d+', event) is None
+    ]
+    if invalid_ids:
+        examples = ', '.join(
+            f'{event} ({category})' for category, event in invalid_ids[:5]
+        )
+        raise ValueError(
+            'VastDB mode supports exon-skipping HsaEX events only; '
+            f'found {len(invalid_ids)} unsupported EVENT IDs: {examples}'
+        )
 
-    # Check for duplicates
-    unique_ids = set(all_ids)
-    if len(unique_ids) < len(all_ids):
-        n_duplicates = len(all_ids) - len(unique_ids)
-        logging.warning(f"\n⚠️  Found {n_duplicates} duplicate EVENT IDs across categories!")
+    all_ids = [
+        event for ids in ids_by_category.values() for event in ids
+    ]
+    logging.info(f"Total EVENT IDs supplied: {len(all_ids)}")
 
-    # Create ID to category mapping (priority: enhanced > silenced > control > constitutive)
-    id_to_category = {}
-    for eid in constitutive_ids:
-        id_to_category[eid] = 'constitutive'
+    memberships = {}
+    for category, ids in ids_by_category.items():
+        for event in ids:
+            memberships.setdefault(event, []).append(category)
+    duplicate_ids = {
+        event: categories
+        for event, categories in memberships.items()
+        if len(categories) > 1
+    }
+    if duplicate_ids:
+        examples = ', '.join(
+            f'{event} ({"/".join(categories)})'
+            for event, categories in list(duplicate_ids.items())[:5]
+        )
+        raise ValueError(
+            'VastDB EVENT IDs must be unique across all input lists; '
+            f'found {len(duplicate_ids)} duplicates: {examples}'
+        )
 
-    for eid in control_ids:
-        id_to_category[eid] = 'control'
-
-    for eid in silenced_ids:
-        id_to_category[eid] = 'silenced'
-
-    for eid in enhanced_ids:
-        id_to_category[eid] = 'enhanced'
-
-    logging.info(f"Unique EVENT IDs after deduplication: {len(id_to_category)}")
+    id_to_category = {
+        event: category
+        for category, ids in ids_by_category.items()
+        for event in ids
+    }
+    logging.info(f"Validated unique EVENT IDs: {len(id_to_category)}")
 
     # Load EVENT_INFO
     logging.info(f"Loading EVENT_INFO: {event_info_file}")
@@ -163,6 +190,32 @@ def load_vastdb_data(enhanced_file, silenced_file, control_file,
 
     # Assign categories
     event_coords_subset['category'] = event_coords_subset['EVENT'].map(id_to_category)
+
+    coordinate_columns = [
+        'chr', 'exonStart_1based', 'exonEnd', 'strand',
+    ]
+    duplicate_coordinates = event_coords_subset.loc[
+        event_coords_subset.duplicated(
+            coordinate_columns, keep=False
+        )
+    ]
+    if not duplicate_coordinates.empty:
+        examples = []
+        for coordinate, group in duplicate_coordinates.groupby(
+            coordinate_columns, sort=False, dropna=False
+        ):
+            events = '/'.join(group['EVENT'].astype(str).tolist())
+            categories = '/'.join(group['category'].astype(str).tolist())
+            examples.append(
+                f'{coordinate[0]}:{coordinate[1]}-{coordinate[2]}'
+                f';{coordinate[3]} ({events}; {categories})'
+            )
+        raise ValueError(
+            'Multiple VastDB events resolve to the same central exon '
+            'coordinate; each exon may occur only once across all input '
+            f'lists. Found {len(examples)} duplicate coordinates: '
+            + ', '.join(examples[:5])
+        )
 
     # Add FDR placeholder (not used but needed for column contract)
     event_coords_subset['FDR'] = 0.001

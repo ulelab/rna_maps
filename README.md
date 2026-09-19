@@ -95,7 +95,10 @@ If your condition is RBP knockdown, run your comparison as condition − control
 
 ### VastDB mode (`--vastdb_mode`)
 
-Accepts four plain text files of VastDB EVENT IDs (one per line, `#` comments allowed), each representing a pre-assigned category. Genomic coordinates are looked up from the VastDB `EVENT_INFO` annotation file using the `COORD_o`, `CO_C1`, and `CO_C2` columns.
+Accepts four plain text files of VastDB exon-skipping EVENT IDs (one `HsaEX`
+ID per line, `#` comments allowed), each representing a pre-assigned
+category. Genomic coordinates are looked up from the VastDB `EVENT_INFO`
+annotation file using the `COORD_o`, `CO_C1`, and `CO_C2` columns.
 
 This mode is useful when categories come from VAST-TOOLS `vast diff` output (or any other source of splicing quantification), where you have already applied your own thresholds to define enhanced, silenced, control, and constitutive exons. No rMATS dependency is required.
 
@@ -126,7 +129,11 @@ Standard rMATS output for skipped exons, e.g. `SE.MATS.JCEC.txt`. Must contain c
 
 ### VastDB inputs
 
-- **EVENT ID lists**: Plain text files with one VastDB EVENT ID per line (e.g. `HsaEX0012345`). Lines beginning with `#` are ignored. At least one list file must be provided; typically all four categories are supplied.
+- **EVENT ID lists**: Plain text files with one VastDB exon-skipping EVENT ID
+  per line (e.g. `HsaEX0012345`). Lines beginning with `#` are ignored.
+  IDs must be unique across all supplied categories, and separate IDs must not
+  resolve to the same central exon coordinate. Other VastDB event classes are
+  rejected because this pipeline constructs cassette-exon four-region maps.
 - **VastDB annotation file**: The `EVENT_INFO-*.tab` file from VastDB. Must contain `EVENT`, `GENE`, `COORD_o`, `REF_CO`, `CO_C1`, and `CO_C2` columns. The version in your `event_lists/` directory (with the full `CO_C1`/`CO_C2` columns) is required — not the minimal version.
 
 ---
