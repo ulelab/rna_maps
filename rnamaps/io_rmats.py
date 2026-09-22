@@ -64,11 +64,43 @@ def load_rmats_data(de_file, min_ctrl, max_ctrl, max_inclusion,
             .map(lambda x: re.sub(r"\.\d+$", "", x))
         )
 
-    # Deduplicate: keep the most extreme dPSI per exon
-    mask = df_rmats.groupby(
-        ['chr', 'exonStart_0base', 'exonEnd', 'strand']
-    )['dPSI'].transform(lambda x: abs(x).rank(ascending=False)) < 2
-    df_rmats = df_rmats[mask]
+    # Deduplicate: keep exactly one event per exon, the one with the most
+    # extreme dPSI.
+    #
+    # This was ``abs(dPSI).rank(ascending=False) < 2``, which relies on rank
+    # 1 being unique. pandas averages tied ranks, so intersected rMATS files
+    # (where one skipped exon appears with several flanking-exon pairs) hit
+    # two failure modes: a 2-way tie at the maximum ranked 1.5 and kept
+    # *both* rows, leaking duplicate exons downstream, while a >=3-way tie
+    # ranked 2.0 and dropped the exon from the analysis entirely.
+    #
+    # Sorting explicitly and taking the first row per exon keeps exactly one
+    # row per exon in both cases. |dPSI| ties break on the original rMATS
+    # row order, so the choice is reproducible across runs.
+    exon_key = ['chr', 'exonStart_0base', 'exonEnd', 'strand']
+    tiebreak = ['index'] if 'index' in df_rmats.columns else []
+    n_events = len(df_rmats)
+    keep_index = (
+        df_rmats
+        .assign(_abs_dpsi=df_rmats['dPSI'].abs())
+        .sort_values(
+            ['_abs_dpsi'] + tiebreak,
+            ascending=[False] + [True] * len(tiebreak),
+            kind='mergesort', na_position='last',
+        )
+        .drop_duplicates(subset=exon_key, keep='first')
+        .index
+    )
+    # Select by mask rather than reindexing so the frame keeps its original
+    # row order; downstream splice-site frames are built from this order.
+    df_rmats = df_rmats.loc[df_rmats.index.isin(keep_index)]
+
+    n_collapsed = n_events - len(df_rmats)
+    if n_collapsed:
+        logging.info(
+            f"Collapsed {n_collapsed} duplicate exon event(s); kept one "
+            f"event per exon ({len(df_rmats)} unique exons)"
+        )
 
     # Assign categories from thresholds
     conditions = [
