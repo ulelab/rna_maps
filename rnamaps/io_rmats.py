@@ -113,6 +113,22 @@ def load_rmats_data(de_file, min_ctrl, max_ctrl, max_inclusion,
     choices = ["silenced", "enhanced", "constitutive", "control"]
     df_rmats["category"] = np.select(conditions, choices, default=None)
 
+    # Drop exons that match no category: |dPSI| outside the control window
+    # but FDR above the significance cutoff, so they are neither confidently
+    # regulated nor confidently unchanged. They cannot join either the
+    # regulated or the background set, and leaving them in carries a null
+    # category into the splice-site frames, where ``category + "_" + id``
+    # yields a NaN name that fails when coverage splits it back apart.
+    uncategorised = df_rmats['category'].isna()
+    n_uncategorised = int(uncategorised.sum())
+    if n_uncategorised:
+        df_rmats = df_rmats[~uncategorised]
+        logging.info(
+            f"Dropped {n_uncategorised} exon(s) matching no category "
+            f"(|dPSI| outside {min_ctrl}..{max_ctrl} but FDR >= {max_fdr}); "
+            f"{len(df_rmats)} exons remain"
+        )
+
     # Filter out constitutive if requested
     if no_constitutive:
         df_rmats = df_rmats[df_rmats['category'] != 'constitutive']

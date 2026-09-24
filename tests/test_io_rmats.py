@@ -112,6 +112,44 @@ def test_distinct_exons_are_all_retained_in_input_order(tmp_path):
     assert df['category'].tolist() == ['silenced', 'control', 'enhanced']
 
 
+def test_uncategorised_exons_are_dropped(tmp_path):
+    """Exons matching no category must not reach the splice-site frames.
+
+    A large dPSI with a non-significant FDR satisfies neither the regulated
+    nor the control conditions. Such rows used to keep a null category, which
+    became a NaN splice-site name and failed in coverage.
+    """
+    path = _write_rmats(tmp_path, [
+        {'exon': (100, 200), 'dPSI': 0.2, 'FDR': 0.01},   # silenced
+        {'exon': (300, 400), 'dPSI': 0.2, 'FDR': 0.50},   # no category
+        {'exon': (500, 600), 'dPSI': -0.3, 'FDR': 0.90},  # no category
+        {'exon': (700, 800), 'dPSI': 0.01, 'FDR': 1.0},   # control
+    ])
+
+    df = load_rmats_data(path, **DEFAULTS)
+
+    assert df['category'].notna().all()
+    assert df['exonStart_0base'].tolist() == [100, 700]
+    assert df['category'].tolist() == ['silenced', 'control']
+
+
+def test_exon_names_are_never_null_after_loading(tmp_path):
+    """The category prefix must be usable for every retained exon.
+
+    Guards the downstream ``category + "_" + exon_id`` construction, which
+    silently produces NaN if any category is null.
+    """
+    path = _write_rmats(tmp_path, [
+        {'exon': (100, 200), 'dPSI': 0.08, 'FDR': 0.60},
+        {'exon': (300, 400), 'dPSI': 0.00, 'FDR': 1.00},
+    ])
+
+    df = load_rmats_data(path, **DEFAULTS)
+
+    names = df['category'] + '_' + df['chr']
+    assert names.notna().all()
+
+
 def test_same_coordinates_on_opposite_strands_are_separate_exons(tmp_path):
     """The exon key includes strand, so both strands survive."""
     path = _write_rmats(tmp_path, [
