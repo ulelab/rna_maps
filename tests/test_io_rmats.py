@@ -116,8 +116,9 @@ def test_uncategorised_exons_are_dropped(tmp_path):
     """Exons matching no category must not reach the splice-site frames.
 
     A large dPSI with a non-significant FDR satisfies neither the regulated
-    nor the control conditions. Such rows used to keep a null category, which
-    became a NaN splice-site name and failed in coverage.
+    nor the control conditions. Such rows used to keep a null category and
+    were then dropped silently further downstream, after being written to the
+    categorised-exon TSV as though they were part of the analysis.
     """
     path = _write_rmats(tmp_path, [
         {'exon': (100, 200), 'dPSI': 0.2, 'FDR': 0.01},   # silenced

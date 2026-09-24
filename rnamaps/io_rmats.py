@@ -116,9 +116,14 @@ def load_rmats_data(de_file, min_ctrl, max_ctrl, max_inclusion,
     # Drop exons that match no category: |dPSI| outside the control window
     # but FDR above the significance cutoff, so they are neither confidently
     # regulated nor confidently unchanged. They cannot join either the
-    # regulated or the background set, and leaving them in carries a null
-    # category into the splice-site frames, where ``category + "_" + id``
-    # yields a NaN name that fails when coverage splits it back apart.
+    # regulated or the background set.
+    #
+    # Coverage already excluded them, because a null category makes
+    # ``category + "_" + exon_id`` NaN and ``_ss_df_to_pbt`` drops unnamed
+    # rows. Dropping them here instead is equivalent for the maps, but it
+    # states the count in the log and keeps them out of the categorised-exon
+    # TSV and exon-length plot, which previously listed exons that never
+    # reached the analysis.
     uncategorised = df_rmats['category'].isna()
     n_uncategorised = int(uncategorised.sum())
     if n_uncategorised:
